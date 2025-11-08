@@ -1,0 +1,5 @@
+redis==4.4.*
+SQLAlchemy==2.0.18
+apscheduler==3.9.*
+python-dateutil==2.8.*
+mysqlclient==2.1.1
