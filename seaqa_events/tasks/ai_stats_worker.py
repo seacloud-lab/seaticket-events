@@ -81,17 +81,14 @@ class AIStatsWorker:
             self.project_stats[project_uuid][model]['output_tokens'] += usage.get('output_tokens') or 0
 
     def receive(self):
-        """Receive AI usage messages from Redis pub/sub."""
-        logging.info('Starts to receive ai calls...')
+        logger.info('Starts to receive ai calls...')
         subscriber = self._redis_client.get_subscriber(self.channel)
-
         while True:
             try:
                 message = subscriber.get_message()
                 if message is not None:
                     try:
                         usage_info = json.loads(message['data'])
-                        logging.info('Received log_ai_model_usage message: %s', usage_info)
                     except:
                         logging.warning('log_ai_model_usage message invalid')
                         continue
@@ -121,7 +118,6 @@ class AIStatsWorker:
         session = self._db_session_class()
         try:
             results = session.execute(text(sql), {'project_uuids': project_uuids})
-            logging.info('Queried %s project owners from database', results)
             for row in results:
                 project_owners_dict[row.project_uuid] = {
                     'owner': row.owner,
@@ -235,7 +231,6 @@ class AIStatsWorker:
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 owner_info = project_owners_dict.get(project_uuid)
-                logging.info('owner_info %s', owner_info)
                 if owner_info:
                     owner = owner_info['owner']
                     org_id = owner_info['org_id']
@@ -263,7 +258,6 @@ class AIStatsWorker:
                     'updated_at': datetime.now()
                 }
                 project_data.append(params)
-                logging.info('project_data %s', project_data)
 
         # Execute database inserts
         session = self._db_session_class()
