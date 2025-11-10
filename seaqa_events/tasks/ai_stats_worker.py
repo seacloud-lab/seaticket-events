@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+from datetime import datetime
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
@@ -22,10 +23,11 @@ logger = logging.getLogger(__name__)
 class AIStatsWorker:
     def __init__(self, config):
         self._db_session_class = init_db_session_class(config)
-        self._redis_client = RedisClient(config)
+        self._redis_client = RedisClient(config, socket_timeout=10)
         self.stats_lock = Lock()
         self.channel = 'log_ai_model_usage'
         self.keep_months = 3
+        self.log_none_message_timeout = 60 * 10
         self._parse_config(config)
         self.reset_stats()
 
@@ -83,10 +85,12 @@ class AIStatsWorker:
     def receive(self):
         logger.info('Starts to receive ai calls...')
         subscriber = self._redis_client.get_subscriber(self.channel)
+        last_message_time = datetime.now()
         while True:
             try:
                 message = subscriber.get_message()
                 if message is not None:
+                    last_message_time = datetime.now()
                     try:
                         usage_info = json.loads(message['data'])
                     except:
@@ -99,10 +103,14 @@ class AIStatsWorker:
                     except Exception as e:
                         logger.exception('save usage_info %s to memory error %s', usage_info, e)
                 else:
+                    if (datetime.now() - last_message_time).seconds >= self.log_none_message_timeout:
+                        logger.warning('No log_ai_model_usage message received for %s seconds', self.log_none_message_timeout)
+                        last_message_time = datetime.now()
                     time.sleep(0.5)
             except Exception as e:
                 logger.error('Failed get message from redis: %s' % e)
                 subscriber = self._redis_client.get_subscriber(self.channel)
+                last_message_time = datetime.now()
 
     def query_project_owners(self, project_uuids):
         project_owners_dict = {}
