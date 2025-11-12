@@ -30,12 +30,15 @@ except Exception as e:
 
 
 def get_config(config_file):
-    """Load configuration from file."""
     config = configparser.ConfigParser()
-    try:
-        config.read(config_file)
-    except Exception as e:
-        logger.critical("Failed to read config file %s: %s" % (config_file, e))
-        raise RuntimeError("Failed to read config file %s: %s" % (config_file, e))
+
+    if config_file:
+        try:
+            config.read(config_file)
+        except Exception as e:
+            logger.critical("Failed to read config file %s: %s" % (config_file, e))
+            raise RuntimeError("Failed to read config file %s: %s" % (config_file, e))
+    else:
+        logger.info("No config file specified. ")
 
     return config

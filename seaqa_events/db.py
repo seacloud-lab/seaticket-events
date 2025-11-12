@@ -44,7 +44,7 @@ def create_engine_from_conf(config):
         if not (password := os.getenv('SEAQA_MYSQL_DB_PASSWORD')):
             password = config.get('DATABASE', 'password')
 
-        if not (db_name := os.getenv('SEAQA_MYSQL_DB_NAME')):
+        if not (db_name := os.getenv('SEAQA_MYSQL_DB_DTABLE_DB_NAME')):
             db_name = config.get('DATABASE', 'db_name')
 
         db_url = "mysql+mysqldb://%s:%s@%s:%s/%s?charset=utf8" % \
