@@ -15,30 +15,24 @@ from sqlalchemy import text
 from seaqa_events.app.config import AI_PRICES
 from seaqa_events.app.event_redis import RedisClient
 from seaqa_events.db import init_db_session_class
-from seaqa_events.utils import get_opt_from_conf_or_env, parse_bool, uuid_str_to_32_chars
+from seaqa_events.utils import uuid_str_to_32_chars
 
 logger = logging.getLogger(__name__)
 
 
 class AIStatsWorker:
-    def __init__(self, config):
-        self._db_session_class = init_db_session_class(config)
-        self._redis_client = RedisClient(config, socket_timeout=10)
+    def __init__(self, configs):
+        self._db_session_class = init_db_session_class(configs)
+        self._redis_client = RedisClient(configs, socket_timeout=10)
         self.stats_lock = Lock()
         self.channel = 'log_ai_model_usage'
         self.keep_months = 3
         self.log_none_message_timeout = 60 * 10
-        self._parse_config(config)
+        self._parse_config(configs)
         self.reset_stats()
 
-    def _parse_config(self, config):
-        section_name = 'AI STATS'
-        key_enabled = 'enabled'
-
-        # enabled
-        enabled = get_opt_from_conf_or_env(config, section_name, key_enabled, default=True)
-        enabled = parse_bool(enabled)
-        self._enabled = enabled
+    def _parse_config(self, configs):
+        self._enabled = configs.get('AI_STATS', {}).get('enabled', True)
 
     def reset_stats(self):
         self.org_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))

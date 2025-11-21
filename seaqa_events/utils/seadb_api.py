@@ -3,7 +3,7 @@ import time
 import jwt
 import requests
 
-from seaqa_events.app.config import JWT_PRIVATE_KEY, SEADB_SERVER_URL
+from seaqa_events.app.config import JWT_PRIVATE_KEY, SEADB_INNER_SERVER_URL
 from seaqa_events.utils.utils import uuid_str_to_36_chars
 
 
@@ -21,7 +21,7 @@ class SeaDBAPI:
     def __init__(self, username='', timeout=30):
         self.timeout = timeout
         self.secret_key = JWT_PRIVATE_KEY
-        self.server_url = SEADB_SERVER_URL
+        self.server_url = SEADB_INNER_SERVER_URL
         self.username = username
 
 
