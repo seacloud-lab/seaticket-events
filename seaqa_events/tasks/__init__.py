@@ -3,12 +3,12 @@ import logging
 import numpy as np
 from sklearn.manifold import TSNE
 
+from seaqa_events.app.log import setup_logger
 from seaqa_events.utils.connection_utils import list_connection_records_with_columns
 from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS
 from seaqa_events.utils.seadb_api import SeaDBAPI
 
-logger = logging.getLogger('tasks')
-task_logger = logger
+task_logger = setup_logger('seaqa_events_task', propagate=False)
 
 def perform_embedding_analysis(project_uuid, connection_id, username):    
     try:
@@ -17,7 +17,7 @@ def perform_embedding_analysis(project_uuid, connection_id, username):
         records = list_connection_records_with_columns(seadb_api, project_uuid, connection_id, column_names,limit=MAX_EMBEDDING_ANALYSIS_RECORDS)
         
         if not records:
-            logger.warning("No records found for embedding analysis")
+            task_logger.warning("No records found for embedding analysis")
             return {'records': []}
             
         valid_records = []
@@ -32,7 +32,7 @@ def perform_embedding_analysis(project_uuid, connection_id, username):
                 vectors.append(ai_summary_vector)
 
         if not vectors:
-            logger.warning("No records with embeddings found")
+            task_logger.warning("No records with embeddings found")
             return {'records': []}
                 
         embeddings_2d = generate_embeddings_2d_with_tsne(vectors)
@@ -46,7 +46,7 @@ def perform_embedding_analysis(project_uuid, connection_id, username):
         }
     
     except Exception as e:
-        logger.error(f"Error in embedding analysis: {str(e)}")
+        task_logger.error(f"Error in embedding analysis: {str(e)}")
         raise
 
 
