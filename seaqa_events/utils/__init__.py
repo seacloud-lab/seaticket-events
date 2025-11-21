@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import configparser
-import logging
 import os
-import re
 import uuid
 
 def get_opt_from_conf_or_env(config, section, key, env_key=None, default=None):
