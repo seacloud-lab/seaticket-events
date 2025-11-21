@@ -23,6 +23,8 @@ try:
 
     # AI-related settings
     AI_PRICES = getattr(seaqa_settings, 'AI_PRICES', {})
+    JWT_PRIVATE_KEY = getattr(seaqa_settings, 'JWT_PRIVATE_KEY', '')
+    SEADB_SERVER_URL = getattr(seaqa_settings, 'SEADB_SERVER_URL', '')
 
 except Exception as e:
     logger.critical("Can not import seaqa_web settings: %s." % e)
