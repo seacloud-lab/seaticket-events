@@ -49,18 +49,21 @@ def add_embedding_analysis_task():
 
     project_uuid = context.get('project_uuid')
     connection_id = context.get('connection_id')
+    connection_type = context.get('connection_type')
     username = context.get('username')
 
     if not project_uuid:
         return make_response(('project_uuid is required.', 400))
     if not connection_id:
         return make_response(('connection_id is required.', 400))
+    if not connection_type:
+        return make_response(('connection_type is required.', 400))
     if not username:
         return make_response(('username is required.', 400))
 
     try:
         task_id = task_manager.add_embedding_analysis_task(
-            project_uuid, connection_id, username)
+            project_uuid, connection_id, connection_type, username)
     except Exception as e:
         task_logger.error(e)
         return make_response((str(e), 500))

@@ -5,16 +5,18 @@ from sklearn.manifold import TSNE
 
 from seaqa_events.app.log import setup_logger
 from seaqa_events.utils.connection_utils import list_connection_records_with_columns
-from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS
+from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS, ConnectionType
 from seaqa_events.utils.seadb_api import SeaDBAPI
 
 task_logger = setup_logger('seaqa_events_task', propagate=False)
 
-def perform_embedding_analysis(project_uuid, connection_id, username):    
+def perform_embedding_analysis(project_uuid, connection_id, connection_type, username):    
     try:
         seadb_api = SeaDBAPI(username)
-        column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector', 'url']
-        records = list_connection_records_with_columns(seadb_api, project_uuid, connection_id, column_names,limit=MAX_EMBEDDING_ANALYSIS_RECORDS)
+        column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector']
+        if connection_type == ConnectionType.GITHUB_ISSUE.value:
+            column_names.append('url')
+        records = list_connection_records_with_columns(seadb_api, project_uuid, connection_id, connection_type, column_names,limit=MAX_EMBEDDING_ANALYSIS_RECORDS)
         
         if not records:
             task_logger.warning("No records found for embedding analysis")
