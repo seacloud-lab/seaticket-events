@@ -7,34 +7,19 @@ from seaqa_events.tasks.task_manager import task_manager
 
 class TasksService(Thread):
 
-    def __init__(self, config):
+    def __init__(self, configs):
         Thread.__init__(self)
-        self._parse_config(config)
+        self._parse_configs(configs)
         
-        task_manager.init(self._workers, self.task_timeout, config)
+        task_manager.init(self._workers, self.task_timeout, configs)
         task_manager.run()
 
-    def _parse_config(self, config):
-        self._host = '127.0.0.1'
-        self._port = '6001'
-        self._workers = 3
-        self.task_timeout = 3600
-
-        section_name = 'TASKS'
-        if not config.has_section(section_name):
-            section_name = 'TASKS'
-
-        if config.has_option(section_name, 'host'):
-            self._host = config.get(section_name, 'host')
-        if config.has_option(section_name, 'port'):
-            self._port = config.getint(section_name, 'port')  
-
-        if config.has_option(section_name, 'workers'):
-            self._workers = config.getint(section_name, 'workers')
-
-        if config.has_option(section_name, 'task_timeout'):
-            self._io_task_timeout = config.getint(section_name, 'task_timeout')
-            
+    def _parse_configs(self, configs):
+        tasks_config = configs.get('TASKS', {})
+        self._host = tasks_config.get('host', '127.0.0.1')
+        self._port = tasks_config.get('port', 6001)
+        self._workers = tasks_config.get('workers', 3)
+        self.task_timeout = tasks_config.get('task_timeout', 3600)
 
     def run(self):
         serve(application, host=self._host, port=int(self._port))
