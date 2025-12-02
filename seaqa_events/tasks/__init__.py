@@ -15,7 +15,7 @@ def perform_embedding_analysis(project_uuid, connection_id, connection_type, use
         seadb_api = SeaDBAPI(username)
         column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector']
         if connection_type == ConnectionType.GITHUB_ISSUE.value:
-            column_names.append('url')
+            column_names.append('url', 'state')
         records = list_connection_records_with_columns(seadb_api, project_uuid, connection_id, connection_type, column_names,limit=MAX_EMBEDDING_ANALYSIS_RECORDS)
         
         if not records:
