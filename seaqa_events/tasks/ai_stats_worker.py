@@ -36,45 +36,54 @@ class AIStatsWorker:
 
     def reset_stats(self):
         self.org_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
-        self.owner_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
+        # { project_uuid: { (model, username, org_id): {'input_tokens': int, 'output_tokens': int} } }
         self.project_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
 
     def save_to_memory(self, usage_info):
+        """
+        usage_info:
+        {
+            'model': 'gpt-4o-mini-2024-07-18',
+            'usage': {'prompt_tokens': 1678, 'completion_tokens': 35, 'total_tokens': 1713},
+            'username': 'seaqa-indexer',
+            'org_id': 3,
+            'project_uuid': '5680b4426dc0418b9e2ae176627f4d94'
+        }
+        """
         if not usage_info.get('model'):
             return
 
         model = usage_info['model']
         usage = usage_info.get('usage') or {}
+        org_id = usage_info.get('org_id')
+        project_uuid = usage_info.get('project_uuid')
 
         if model not in AI_PRICES:
             logger.warning('model %s price not defined', model)
             return
 
-        # Normalize token field names
-        if 'prompt_tokens' in usage:
-            usage['input_tokens'] = usage['prompt_tokens']
-        if 'completion_tokens' in usage:
-            usage['output_tokens'] = usage['completion_tokens']
+        # Normalize token field names (prompt_tokens -> input_tokens, completion_tokens -> output_tokens)
+        input_tokens = usage.get('prompt_tokens') or usage.get('input_tokens') or 0
+        output_tokens = usage.get('completion_tokens') or usage.get('output_tokens') or 0
 
-        if not isinstance(usage.get('input_tokens'), int):
-            usage['input_tokens'] = 0
-        if not isinstance(usage.get('output_tokens'), int):
-            usage['output_tokens'] = 0
+        if not isinstance(input_tokens, int):
+            input_tokens = 0
+        if not isinstance(output_tokens, int):
+            output_tokens = 0
 
-        # Track organization or user level usage
-        if usage_info['org_id'] != -1:
-            self.org_stats[usage_info['org_id']][model]['input_tokens'] += usage.get('input_tokens') or 0
-            self.org_stats[usage_info['org_id']][model]['output_tokens'] += usage.get('output_tokens') or 0
-        else:
-            self.owner_stats[usage_info['username']][model]['input_tokens'] += usage.get('input_tokens') or 0
-            self.owner_stats[usage_info['username']][model]['output_tokens'] += usage.get('output_tokens') or 0
+        # Track organization level usage (stats_ai_by_team)
+        if org_id is not None:
+            self.org_stats[org_id][model]['input_tokens'] += input_tokens
+            self.org_stats[org_id][model]['output_tokens'] += output_tokens
 
-        # Track project-level usage
-        project_uuid = usage_info.get('project_uuid')
+        # Track project-level usage (stats_ai_by_project)
         if project_uuid:
-            project_uuid = uuid_str_to_32_chars(usage_info['project_uuid'])
-            self.project_stats[project_uuid][model]['input_tokens'] += usage.get('input_tokens') or 0
-            self.project_stats[project_uuid][model]['output_tokens'] += usage.get('output_tokens') or 0
+            project_uuid = uuid_str_to_32_chars(project_uuid)
+            username = usage_info.get('username')
+            key = (model, username, org_id)
+            stats = self.project_stats[project_uuid][key]
+            stats['input_tokens'] += input_tokens
+            stats['output_tokens'] += output_tokens
 
     def receive(self):
         logger.info('Starts to receive ai calls...')
@@ -106,50 +115,25 @@ class AIStatsWorker:
                 subscriber = self._redis_client.get_subscriber(self.channel)
                 last_message_time = datetime.now()
 
-    def query_project_owners(self, project_uuids):
-        project_owners_dict = {}
-        if not project_uuids:
-            return project_owners_dict
-
-        sql = """
-            SELECT p.uuid AS project_uuid, w.owner AS owner, w.org_id as org_id
-            FROM projects p
-            JOIN workspaces w ON p.workspace_id=w.id
-            WHERE p.uuid IN :project_uuids
-        """ 
-        session = self._db_session_class()
-        try:
-            results = session.execute(text(sql), {'project_uuids': project_uuids})
-            for row in results:
-                project_owners_dict[row.project_uuid] = {
-                    'owner': row.owner,
-                    'org_id': row.org_id or -1
-                }
-        except Exception as e:
-            logger.exception(e)
-        finally:
-            session.close()
-        return project_owners_dict
-
     def stats_worker(self):
-        if not self.org_stats and not self.owner_stats and not self.project_stats:
+        if not self.org_stats and not self.project_stats:
             logger.info('There are no stats')
             return
 
         # Create atomic snapshot and reset
         with self.stats_lock:
             org_stats = deepcopy(self.org_stats)
-            owner_stats = deepcopy(self.owner_stats)
             project_stats = deepcopy(self.project_stats)
             self.reset_stats()
 
         logger.info('There are %s org stats', len(org_stats))
-        logger.info('There are %s owner stats (including groups with -1 org_id)', len(owner_stats))
         logger.info('There are %s project stats', len(project_stats))
 
         month = datetime.today().replace(day=1).date()
+        today = datetime.today().date()
+        now = datetime.now()
 
-        # Prepare team/org statistics
+        # Prepare team/org statistics (stats_ai_by_team)
         team_data = []
         team_sql = '''
         INSERT INTO `stats_ai_by_team`(`org_id`, `month`, `model`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
@@ -166,108 +150,61 @@ class AIStatsWorker:
 
                 input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
                 output_tokens_price = AI_PRICES[model].get('output_tokens_1k') or 0
-                input_cost = input_tokens_price * (input_tokens / 1000)
-                output_cost = output_tokens_price * (output_tokens / 1000)
-                logger.info('org %s model %s, input_tokens %s cost %s, output_tokens %s cost %s',
-                           org_id, model, input_tokens, input_cost, output_tokens, output_cost)
+                cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
 
-                params = {
+                logger.info('org %s model %s, input_tokens %s, output_tokens %s, cost %s',
+                           org_id, model, input_tokens, output_tokens, cost)
+
+                team_data.append({
                     'org_id': org_id,
                     'month': month,
                     'model': model,
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
-                    'cost': input_cost + output_cost,
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now()
-                }
-                team_data.append(params)
+                    'cost': cost,
+                    'created_at': now,
+                    'updated_at': now
+                })
 
-        # Prepare owner/user statistics
-        owner_data = []
-        owner_sql = '''
-        INSERT INTO `stats_ai_by_owner`(`owner_id`, `month`, `model`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:owner_id, :month, :model, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
-        ON DUPLICATE KEY UPDATE `input_tokens`=`input_tokens`+VALUES(`input_tokens`),
-                                `output_tokens`=`output_tokens`+VALUES(`output_tokens`),
-                                `cost`=`cost`+VALUES(`cost`),
-                                `updated_at`=VALUES(`updated_at`)
-        '''
-        for owner_id, models_dict in owner_stats.items():
-            for model, usage in models_dict.items():
-                input_tokens = usage.get('input_tokens') or 0
-                output_tokens = usage.get('output_tokens') or 0
-
-                input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
-                output_tokens_price = AI_PRICES[model].get('output_tokens_1k') or 0
-                input_cost = input_tokens_price * (input_tokens / 1000)
-                output_cost = output_tokens_price * (output_tokens / 1000)
-                logger.info('owner %s model %s, input_tokens %s cost %s, output_tokens %s cost %s',
-                           owner_id, model, input_tokens, input_cost, output_tokens, output_cost)
-
-                params = {
-                    'owner_id': owner_id,
-                    'month': month,
-                    'model': model,
-                    'input_tokens': input_tokens,
-                    'output_tokens': output_tokens,
-                    'cost': input_cost + output_cost,
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now()
-                }
-                owner_data.append(params)
-
-        # Prepare project statistics (replaces dtable concept)
+        # Prepare project statistics (stats_ai_by_project)
         project_data = []
         project_sql = '''
-        INSERT INTO `stats_ai_by_project`(`project_uuid`, `date`, `model`, `owner`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :owner, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        INSERT INTO `stats_ai_by_project`(`project_uuid`, `date`, `model`, `username`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :username, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         ON DUPLICATE KEY UPDATE `input_tokens`=`input_tokens`+VALUES(`input_tokens`),
                                 `output_tokens`=`output_tokens`+VALUES(`output_tokens`),
                                 `cost`=`cost`+VALUES(`cost`),
                                 `updated_at`=VALUES(`updated_at`)
         '''
-        project_owners_dict = self.query_project_owners(list(project_stats.keys()))
-        for project_uuid, models_dict in project_stats.items():
-            for model, usage in models_dict.items():
+        for project_uuid, stats_dict in project_stats.items():
+            for (model, username, org_id), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
-                owner_info = project_owners_dict.get(project_uuid)
-                if owner_info:
-                    owner = owner_info['owner']
-                    org_id = owner_info['org_id']
-                else:
-                    owner = None
-                    org_id = None
-
                 input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
                 output_tokens_price = AI_PRICES[model].get('output_tokens_1k') or 0
-                input_cost = input_tokens_price * (input_tokens / 1000)
-                output_cost = output_tokens_price * (output_tokens / 1000)
-                logger.info('project %s model %s, input_tokens %s cost %s, output_tokens %s cost %s',
-                           project_uuid, model, input_tokens, input_cost, output_tokens, output_cost)
+                cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
 
-                params = {
+                logger.info('project %s model %s username %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
+                           project_uuid, model, username, org_id, input_tokens, output_tokens, cost)
+
+                project_data.append({
                     'project_uuid': project_uuid,
-                    'date': datetime.today().date(),
+                    'date': today,
                     'model': model,
-                    'owner': owner,
+                    'username': username,
                     'org_id': org_id,
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
-                    'cost': input_cost + output_cost,
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now()
-                }
-                project_data.append(params)
+                    'cost': cost,
+                    'created_at': now,
+                    'updated_at': now
+                })
 
         # Execute database inserts
         session = self._db_session_class()
         try:
             if team_data:
                 session.execute(text(team_sql), team_data)
-            if owner_data:
-                session.execute(text(owner_sql), owner_data)
             if project_data:
                 session.execute(text(project_sql), project_data)
             session.commit()
@@ -296,13 +233,12 @@ class AIStatsWorker:
             logger.info('Starts to clean old stats ai...')
             session = self._db_session_class()
             sql1 = "DELETE FROM `stats_ai_by_team` WHERE `month` < :clean_month"
-            sql2 = "DELETE FROM `stats_ai_by_owner` WHERE `month` < :clean_month"
-            sql3 = "DELETE FROM `stats_ai_by_project` WHERE `date` < :clean_month"
+            sql2 = "DELETE FROM `stats_ai_by_project` WHERE `date` < :clean_date"
             clean_month = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-01')
+            clean_date = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-%d')
             try:
                 session.execute(text(sql1), {'clean_month': clean_month})
-                session.execute(text(sql2), {'clean_month': clean_month})
-                session.execute(text(sql3), {'clean_month': clean_month})
+                session.execute(text(sql2), {'clean_date': clean_date})
                 session.commit()
             except Exception as e:
                 logger.exception(e)
