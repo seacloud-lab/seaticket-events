@@ -167,15 +167,24 @@ class AIStatsWorker:
                 })
 
         # Prepare project statistics (stats_ai_by_project)
-        project_data = []
-        project_sql = '''
+        project_select_sql = '''
+        SELECT `id` FROM `stats_ai_by_project`
+        WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `username`=:username
+        LIMIT 1
+        '''
+        project_update_sql = '''
+        UPDATE `stats_ai_by_project`
+        SET `input_tokens`=`input_tokens`+:input_tokens,
+            `output_tokens`=`output_tokens`+:output_tokens,
+            `cost`=`cost`+:cost,
+            `updated_at`=:updated_at
+        WHERE `id`=:id
+        '''
+        project_insert_sql = '''
         INSERT INTO `stats_ai_by_project`(`project_uuid`, `date`, `model`, `username`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
         VALUES (:project_uuid, :date, :model, :username, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
-        ON DUPLICATE KEY UPDATE `input_tokens`=`input_tokens`+VALUES(`input_tokens`),
-                                `output_tokens`=`output_tokens`+VALUES(`output_tokens`),
-                                `cost`=`cost`+VALUES(`cost`),
-                                `updated_at`=VALUES(`updated_at`)
         '''
+        project_data = []
         for project_uuid, stats_dict in project_stats.items():
             for (model, username, org_id), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
@@ -200,13 +209,32 @@ class AIStatsWorker:
                     'updated_at': now
                 })
 
-        # Execute database inserts
+        # Execute database operations
         session = self._db_session_class()
         try:
             if team_data:
                 session.execute(text(team_sql), team_data)
-            if project_data:
-                session.execute(text(project_sql), project_data)
+
+            # For project stats: check existence then update or insert
+            for data in project_data:
+                result = session.execute(text(project_select_sql), {
+                    'project_uuid': data['project_uuid'],
+                    'date': data['date'],
+                    'model': data['model'],
+                    'username': data['username']
+                }).fetchone()
+
+                if result:
+                    session.execute(text(project_update_sql), {
+                        'id': result[0],
+                        'input_tokens': data['input_tokens'],
+                        'output_tokens': data['output_tokens'],
+                        'cost': data['cost'],
+                        'updated_at': data['updated_at']
+                    })
+                else:
+                    session.execute(text(project_insert_sql), data)
+
             session.commit()
         except Exception as e:
             logger.exception(e)
