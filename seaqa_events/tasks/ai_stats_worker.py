@@ -36,8 +36,10 @@ class AIStatsWorker:
 
     def reset_stats(self):
         self.org_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
-        # { project_uuid: { (model, username, org_id): {'input_tokens': int, 'output_tokens': int} } }
+        # { project_uuid: { (model, username): {'input_tokens': int, 'output_tokens': int} } }
         self.project_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
+        # { project_uuid: org_id } - cache to avoid repeated database queries
+        self.project_org_cache = {}
 
     def save_to_memory(self, usage_info):
         """
@@ -46,7 +48,6 @@ class AIStatsWorker:
             'model': 'gpt-4o-mini-2024-07-18',
             'usage': {'prompt_tokens': 1678, 'completion_tokens': 35, 'total_tokens': 1713},
             'username': 'seaqa-indexer',
-            'org_id': 3,
             'project_uuid': '5680b4426dc0418b9e2ae176627f4d94'
         }
         """
@@ -55,7 +56,6 @@ class AIStatsWorker:
 
         model = usage_info['model']
         usage = usage_info.get('usage') or {}
-        org_id = usage_info.get('org_id')
         project_uuid = usage_info.get('project_uuid')
 
         if model not in AI_PRICES:
@@ -71,19 +71,28 @@ class AIStatsWorker:
         if not isinstance(output_tokens, int):
             output_tokens = 0
 
-        # Track organization level usage (stats_ai_by_team)
-        if org_id is not None:
-            self.org_stats[org_id][model]['input_tokens'] += input_tokens
-            self.org_stats[org_id][model]['output_tokens'] += output_tokens
+        org_id = usage_info.get('org_id')
+        project_uuid = uuid_str_to_32_chars(project_uuid)
+        if org_id is None:
+            if project_uuid in self.project_org_cache:
+                org_id = self.project_org_cache[project_uuid]
+            else:
+                org_id = self._get_org_id_by_project_uuid(project_uuid)
+                if org_id is None:
+                    logger.warning('project %s org_id not found', project_uuid)
+                    return
+        self.project_org_cache[project_uuid] = org_id
 
-        # Track project-level usage (stats_ai_by_project)
-        if project_uuid:
-            project_uuid = uuid_str_to_32_chars(project_uuid)
-            username = usage_info.get('username')
-            key = (model, username, org_id)
-            stats = self.project_stats[project_uuid][key]
-            stats['input_tokens'] += input_tokens
-            stats['output_tokens'] += output_tokens
+        # org_stats
+        self.org_stats[org_id][model]['input_tokens'] += input_tokens
+        self.org_stats[org_id][model]['output_tokens'] += output_tokens
+
+        # project_stats
+        username = usage_info.get('username')
+        key = (model, username)
+        stats = self.project_stats[project_uuid][key]
+        stats['input_tokens'] += input_tokens
+        stats['output_tokens'] += output_tokens
 
     def receive(self):
         logger.info('Starts to receive ai calls...')
@@ -124,6 +133,7 @@ class AIStatsWorker:
         with self.stats_lock:
             org_stats = deepcopy(self.org_stats)
             project_stats = deepcopy(self.project_stats)
+            project_org_cache = deepcopy(self.project_org_cache)
             self.reset_stats()
 
         logger.info('There are %s org stats', len(org_stats))
@@ -186,7 +196,8 @@ class AIStatsWorker:
         '''
         project_data = []
         for project_uuid, stats_dict in project_stats.items():
-            for (model, username, org_id), usage in stats_dict.items():
+            org_id = project_org_cache.get(project_uuid)
+            for (model, username), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
@@ -240,6 +251,24 @@ class AIStatsWorker:
             logger.exception(e)
         finally:
             session.close()
+    
+    def _get_org_id_by_project_uuid(self, project_uuid):
+        session = self._db_session_class()
+        org_id = None
+        try:
+            sql = """SELECT workspace_id FROM projects WHERE uuid=:project_uuid AND deleted=false"""
+            result = session.execute(text(sql), {'project_uuid': project_uuid}).fetchone()
+            if result:
+                workspace_id = result[0]
+                sql = """SELECT org_id FROM workspaces WHERE id=:workspace_id AND deleted=false"""
+                workspace = session.execute(text(sql), {'workspace_id': workspace_id}).fetchone()
+                if workspace:
+                    org_id = workspace[0]
+            return org_id
+        except Exception as e:
+            logger.exception(e)
+        finally:
+            session.close()
 
     def stats(self):
         """Scheduler for periodic statistics aggregation."""
@@ -261,12 +290,11 @@ class AIStatsWorker:
             logger.info('Starts to clean old stats ai...')
             session = self._db_session_class()
             sql1 = "DELETE FROM `stats_ai_by_team` WHERE `month` < :clean_month"
-            sql2 = "DELETE FROM `stats_ai_by_project` WHERE `date` < :clean_date"
+            sql2 = "DELETE FROM `stats_ai_by_project` WHERE `date` < :clean_month"
             clean_month = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-01')
-            clean_date = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-%d')
             try:
                 session.execute(text(sql1), {'clean_month': clean_month})
-                session.execute(text(sql2), {'clean_date': clean_date})
+                session.execute(text(sql2), {'clean_month': clean_month})
                 session.commit()
             except Exception as e:
                 logger.exception(e)
