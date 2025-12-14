@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
 import logging
+import os
+import json
 import numpy as np
 from sklearn.manifold import TSNE
+from sqlalchemy import text
+from dateutil import parser
+from openpyxl import Workbook
 
+from seaqa_events.app.config import configs, TEMP_EXPORT_VIEW_DIR
+from seaqa_events.db import init_db_session_class
 from seaqa_events.app.log import setup_logger
 from seaqa_events.utils.connection_utils import list_connection_records_with_columns
+from seaqa_events.utils.utils import uuid_str_to_32_chars
 from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS, ConnectionType
 from seaqa_events.utils.seadb_api import SeaDBAPI
+from seaqa_events.utils.sql_view import view_data_2_sql, filter_display_columns
 
 task_logger = setup_logger('seaqa_events_task', propagate=False)
 
@@ -71,3 +80,77 @@ def generate_embeddings_2d_with_tsne(vectors):
         result.append(coords)
     
     return result
+
+
+def convert_kb_view_to_excel(project_uuid, view_id, username):
+    try:
+        target_dir = os.path.join(TEMP_EXPORT_VIEW_DIR, str(project_uuid))
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Fetch project name and view name
+        session_class = init_db_session_class(configs)
+        with session_class() as session:
+            # Get project name
+            project_res = session.execute(text("SELECT name FROM projects WHERE uuid=:p"), {'p': uuid_str_to_32_chars(project_uuid)}).fetchone()
+            project_name = project_res[0] if project_res else 'project'
+
+            # Get view name
+            view_res = session.execute(text("SELECT details FROM knowledge_base_views WHERE project_uuid=:p"), {'p': uuid_str_to_32_chars(project_uuid)}).fetchone()
+
+        details = json.loads(view_res[0]) if view_res else {'views': []}
+        view = next((v for v in details.get('views', []) if v.get('_id') == view_id), {'name': 'view'})
+        view_name = view.get('name') or 'view'
+
+        # Fetch columns metadata from SeaDB
+        seadb_api = SeaDBAPI(username)
+        metadata = seadb_api.get_base_metadata(project_uuid)
+
+        tables_metadata = metadata.get('tables') or []
+        kb_table_name = 'knowledge_base'
+        table_meta = next((t for t in tables_metadata if t.get('name') == kb_table_name), {})
+        columns = table_meta.get('columns', [])
+        display_columns = filter_display_columns(columns) or columns
+
+        # Build SQL and query rows from SeaDB
+        sql = view_data_2_sql(kb_table_name, display_columns, view, username, 0, 1000, include_deleted=True)
+        res = seadb_api.query_rows(project_uuid, sql, convert_keys=False)
+        rows = res.get('results', [])
+
+        # Write XLSX
+        COLUMN_NAME_MAP = {
+            'title': 'Title',
+            'content': 'Content',
+            'creator': 'Creator',
+            'created_time': 'Created time',
+            'last_modifier': 'Last modifier',
+            'modified_time': 'Last modified time',
+        }
+
+        excel_name = f'{project_name}_knowledge_base_{view_name}.xlsx'
+        target_path = os.path.join(target_dir, excel_name)
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet(view_name or 'view')
+        
+        header = [COLUMN_NAME_MAP.get(c.get('name'), c.get('name')) for c in (display_columns or [])]
+        header_names = [c.get('name') for c in (display_columns or [])]
+        header_keys = [c.get('key') for c in (display_columns or [])]
+
+        if header:
+            ws.append(header)
+        for row in (rows or []):
+            row_data = []
+            for col_name, col_key in zip(header_names, header_keys):
+                val = row.get(col_key)
+                if col_name in ('created_time', 'modified_time') and val:
+                    try:
+                        dt = parser.parse(str(val))
+                        val = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        pass
+                row_data.append(val)
+            ws.append(row_data)
+        wb.save(target_path)
+        return {}
+    except Exception as e:
+        task_logger.error(f'KB export error: {e}')
+        raise
