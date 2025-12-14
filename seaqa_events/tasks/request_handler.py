@@ -108,6 +108,47 @@ def convert_kb_view_to_excel():
     return make_response(({'task_id': task_id}, 200))
 
 
+@app.route('/import-kb-from-excel', methods=['POST'])
+def import_kb_from_excel():
+    is_valid, error = check_auth_token(request)
+    if not is_valid:
+        return make_response((error, 403))
+
+    if task_manager.tasks_queue.full():
+        task_logger.warning('tasks server busy, queue size: %d, current tasks: %s, threads is_alive: %s'
+                                 % (task_manager.tasks_queue.qsize(), task_manager.current_task_info,
+                                    task_manager.threads_is_alive()))
+        return make_response(('tasks server busy.', 400))
+
+    try:
+        context = json.loads(request.data)
+    except:
+        return make_response(('import kb from excel context invalid.', 400))
+
+    project_uuid = context.get('project_uuid')
+    username = context.get('username')
+    file_name = context.get('file_name')
+    preview_only = context.get('preview_only', False)
+
+    if not project_uuid:
+        return make_response(('project_uuid is required.', 400))
+    if not username:
+        return make_response(('username is required.', 400))
+    if not file_name:
+        return make_response(('file name is required.', 400))
+
+    try:
+        if preview_only:
+            task_id = task_manager.add_preview_import_kb_excel_task(project_uuid, file_name)
+        else:
+            task_id = task_manager.add_import_kb_from_excel_task(project_uuid, username, file_name)
+    except Exception as e:
+        task_logger.error(e)
+        return make_response((str(e), 500))
+
+    return make_response(({'task_id': task_id}, 200))
+
+
 @app.route('/embedding-analysis-task-status', methods=['GET'])
 def query_embedding_analysis_task_status():
     is_valid, error = check_auth_token(request)

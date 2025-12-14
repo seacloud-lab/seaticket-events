@@ -67,6 +67,26 @@ class TaskManager(object):
         self.tasks_queue.put(task_id)
         return task_id
 
+    @log_function_call
+    def add_import_kb_from_excel_task(self, project_uuid, username, file_name):
+        from seaqa_events.tasks import import_kb_from_excel
+
+        task_id = str(uuid.uuid4())
+        task = (import_kb_from_excel, (project_uuid, username, file_name))
+        self.tasks_map[task_id] = task
+        self.tasks_queue.put(task_id)
+        return task_id
+
+    @log_function_call
+    def add_preview_import_kb_excel_task(self, project_uuid, file_name):
+        from seaqa_events.tasks import preview_import_kb_from_excel
+
+        task_id = str(uuid.uuid4())
+        task = (preview_import_kb_from_excel, (project_uuid, file_name))
+        self.tasks_map[task_id] = task
+        self.tasks_queue.put(task_id)
+        return task_id
+
     def query_status(self, task_id):
         task_result = self.task_results_map.pop(task_id, None)
         if not task_result:
