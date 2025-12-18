@@ -57,6 +57,16 @@ class TaskManager(object):
 
         return task_id
 
+    @log_function_call
+    def add_convert_kb_view_to_excel_task(self, project_uuid, view_id, username):
+        from seaqa_events.tasks import convert_kb_view_to_excel
+
+        task_id = str(uuid.uuid4())
+        task = (convert_kb_view_to_excel, (project_uuid, view_id, username))
+        self.tasks_map[task_id] = task
+        self.tasks_queue.put(task_id)
+        return task_id
+
     def query_status(self, task_id):
         task_result = self.task_results_map.pop(task_id, None)
         if not task_result:
