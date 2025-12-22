@@ -3,6 +3,7 @@ import logging
 import os
 import json
 import numpy as np
+import datetime
 from sklearn.manifold import TSNE
 from sqlalchemy import text
 from dateutil import parser
@@ -173,10 +174,6 @@ def preview_import_kb_from_excel(project_uuid, file_name, limit=20):
         COLUMN_NAME_MAP = {
             'title': 'Title',
             'content': 'Content',
-            'creator': 'Creator',
-            'created_time': 'Created time',
-            'last_modifier': 'Last modifier',
-            'modified_time': 'Last modified time',
         }
         header_to_key = {v.lower(): k for k, v in COLUMN_NAME_MAP.items()}
 
@@ -190,7 +187,7 @@ def preview_import_kb_from_excel(project_uuid, file_name, limit=20):
                 column_indexes[key] = idx
 
         if 'title' not in column_indexes or 'content' not in column_indexes:
-            raise Exception("Excel file must contain 'Title' and 'Content' columns.")
+            return {'file_name': file_name, 'preview_rows': [], 'total_rows': 0}
 
         preview_rows = []
         total_rows = 0
@@ -205,13 +202,6 @@ def preview_import_kb_from_excel(project_uuid, file_name, limit=20):
                 value = row[idx]
                 if value is None:
                     continue
-                if key in ('created_time', 'modified_time'):
-                    try:
-                        value = value.isoformat()
-                    except AttributeError:
-                        value = str(value)
-                else:
-                    value = str(value)
                 row_obj[key] = value
             if 'title' in row_obj and 'content' in row_obj:
                 total_rows += 1
@@ -240,10 +230,6 @@ def import_kb_from_excel(project_uuid, username, file_name):
         COLUMN_NAME_MAP = {
             'title': 'Title',
             'content': 'Content',
-            'creator': 'Creator',
-            'created_time': 'Created time',
-            'last_modifier': 'Last modifier',
-            'modified_time': 'Last modified time',
         }
         header_to_key = {v.lower(): k for k, v in COLUMN_NAME_MAP.items()}
 
@@ -257,11 +243,12 @@ def import_kb_from_excel(project_uuid, username, file_name):
                 column_indexes[key] = idx
 
         if 'title' not in column_indexes or 'content' not in column_indexes:
-            raise Exception("Excel file must contain 'Title' and 'Content' columns.")
+            return {}
 
         rows_to_insert = []
         seadb_api = SeaDBAPI(username)
         kb_table_name = 'knowledge_base'
+        now = datetime.datetime.now(datetime.UTC).isoformat()
 
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row:
@@ -273,15 +260,12 @@ def import_kb_from_excel(project_uuid, username, file_name):
                 value = row[idx]
                 if value is None:
                     continue
-                if key in ('created_time', 'modified_time'):
-                    try:
-                        value = value.isoformat()
-                    except AttributeError:
-                        value = str(value)
-                else:
-                    value = str(value)
                 row_obj[key] = value
             if 'title' in row_obj and 'content' in row_obj:
+                row_obj['creator'] = username
+                row_obj['last_modifier'] = username
+                row_obj['created_time'] = now
+                row_obj['modified_time'] = now
                 row_obj['deleted'] = False
                 rows_to_insert.append(row_obj)
             if len(rows_to_insert) >= 1000:
