@@ -12,30 +12,49 @@ from openpyxl import Workbook, load_workbook
 from seaqa_events.app.config import configs, TEMP_EXPORT_VIEW_DIR
 from seaqa_events.db import init_db_session_class
 from seaqa_events.app.log import setup_logger
-from seaqa_events.utils.connection_utils import list_connection_records_with_columns
 from seaqa_events.utils.utils import uuid_str_to_32_chars
 from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS, ConnectionType
 from seaqa_events.utils.seadb_api import SeaDBAPI
+from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.sql_view import view_data_2_sql, filter_display_columns
 
 task_logger = setup_logger('seaqa_events_task', propagate=False)
 
-def perform_embedding_analysis(project_uuid, connection_id, connection_type, username):    
+def perform_embedding_analysis(project_uuid, connection_ids, username):
     try:
         seadb_api = SeaDBAPI(username)
-        column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector']
-        if connection_type == ConnectionType.GITHUB_ISSUE.value:
-            column_names.extend(['url', 'state'])
-        records = list_connection_records_with_columns(seadb_api, project_uuid, connection_id, connection_type, column_names,limit=MAX_EMBEDDING_ANALYSIS_RECORDS)
-        
-        if not records:
+        all_records = []
+
+        if isinstance(connection_ids, str):
+            connection_ids = [cid.strip() for cid in connection_ids.split(',') if cid.strip()]
+
+        session_class = init_db_session_class(configs)
+        seaqa_db = SeaqaDB(session_class)
+        connections = seaqa_db.get_connection_by_ids(project_uuid, tuple(connection_ids))
+
+        for conn in connections:
+            connection_id = conn.id
+            connection_type = conn.type
+
+            column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector']
+            if connection_type == ConnectionType.GITHUB_ISSUE.value:
+                column_names.extend(['url', 'state'])
+
+            records = seadb_api.list_connection_records_with_columns(
+                project_uuid, connection_id, connection_type,
+                column_names, limit=MAX_EMBEDDING_ANALYSIS_RECORDS,
+                extra_columns={'connection_id': connection_id, 'connection_type': connection_type}
+            )
+            all_records.extend(records)
+
+        if not all_records:
             task_logger.warning("No records found for embedding analysis")
             return {'records': []}
-            
+
         valid_records = []
         vectors = []
-        
-        for record in records:
+
+        for record in all_records:
             ai_summary = record.get('ai_summary')
             ai_summary_vector = record.get('ai_summary_vector')
             if ai_summary and ai_summary_vector:
@@ -46,7 +65,7 @@ def perform_embedding_analysis(project_uuid, connection_id, connection_type, use
         if not vectors:
             task_logger.warning("No records with embeddings found")
             return {'records': []}
-                
+
         embeddings_2d = generate_embeddings_2d_with_tsne(vectors)
         for i, record in enumerate(valid_records):
             if i < len(embeddings_2d):
