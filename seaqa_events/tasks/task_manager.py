@@ -46,12 +46,12 @@ class TaskManager(object):
         return task_id in self.tasks_map or task_id in self.task_results_map
 
     @log_function_call
-    def add_embedding_analysis_task(self, project_uuid, connection_id, connection_type, username):
+    def add_embedding_analysis_task(self, project_uuid, connection_ids, username):
         from seaqa_events.tasks import perform_embedding_analysis
 
         task_id = str(uuid.uuid4())
         task = (perform_embedding_analysis,
-                (project_uuid, connection_id, connection_type, username))
+                (project_uuid, connection_ids, username))
         self.tasks_map[task_id] = task
         self.tasks_queue.put(task_id)
 
