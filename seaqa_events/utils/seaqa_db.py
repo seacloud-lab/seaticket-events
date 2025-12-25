@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy import text
 
-from seaqa_events.utils.utils import uuid_str_to_32_chars
+from seaqa_events.utils import uuid_str_to_32_chars
 
 
 logger = logging.getLogger('__name__')

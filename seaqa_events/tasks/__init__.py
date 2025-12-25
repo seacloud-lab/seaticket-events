@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 from seaqa_events.app.config import configs, TEMP_EXPORT_VIEW_DIR
 from seaqa_events.db import init_db_session_class
 from seaqa_events.app.log import setup_logger
-from seaqa_events.utils.utils import uuid_str_to_32_chars
+from seaqa_events.utils import uuid_str_to_32_chars
 from seaqa_events.utils.constant import MAX_EMBEDDING_ANALYSIS_RECORDS, ConnectionType
 from seaqa_events.utils.seadb_api import SeaDBAPI
 from seaqa_events.utils.seaqa_db import SeaqaDB
@@ -33,6 +33,9 @@ def perform_embedding_analysis(project_uuid, connection_ids, username, start_yea
         connections = seaqa_db.get_connection_by_ids(project_uuid, tuple(connection_ids))
 
         for conn in connections:
+            remaining = MAX_EMBEDDING_ANALYSIS_RECORDS - len(all_records)
+            if remaining <= 0:
+                break
             connection_id = conn.id
             connection_type = conn.type
 
@@ -42,7 +45,7 @@ def perform_embedding_analysis(project_uuid, connection_ids, username, start_yea
 
             records = seadb_api.list_connection_records_with_columns(
                 project_uuid, connection_id, connection_type,
-                column_names, limit=MAX_EMBEDDING_ANALYSIS_RECORDS,
+                column_names, limit=remaining,
                 extra_columns={'connection_id': connection_id, 'connection_type': connection_type},
                 start_year=start_year, end_year=end_year
             )

@@ -4,7 +4,7 @@ import jwt
 import requests
 
 from seaqa_events.app.config import JWT_PRIVATE_KEY, SEADB_INNER_SERVER_URL
-from seaqa_events.utils.utils import uuid_str_to_36_chars, get_connection_table_name
+from seaqa_events.utils import get_connection_table_name, uuid_str_to_36_chars
 
 
 logger = logging.getLogger(__name__)
