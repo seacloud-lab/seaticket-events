@@ -20,7 +20,7 @@ from seaqa_events.utils.sql_view import view_data_2_sql, filter_display_columns
 
 task_logger = setup_logger('seaqa_events_task', propagate=False)
 
-def perform_embedding_analysis(project_uuid, connection_ids, username):
+def perform_embedding_analysis(project_uuid, connection_ids, username, start_year=None, end_year=None):
     try:
         seadb_api = SeaDBAPI(username)
         all_records = []
@@ -43,7 +43,8 @@ def perform_embedding_analysis(project_uuid, connection_ids, username):
             records = seadb_api.list_connection_records_with_columns(
                 project_uuid, connection_id, connection_type,
                 column_names, limit=MAX_EMBEDDING_ANALYSIS_RECORDS,
-                extra_columns={'connection_id': connection_id, 'connection_type': connection_type}
+                extra_columns={'connection_id': connection_id, 'connection_type': connection_type},
+                start_year=start_year, end_year=end_year
             )
             all_records.extend(records)
 
@@ -73,7 +74,6 @@ def perform_embedding_analysis(project_uuid, connection_ids, username):
                 record['y'] = embeddings_2d[i][1]
         return {
             'records': valid_records,
-            'total_processed': len(valid_records)
         }
     
     except Exception as e:
