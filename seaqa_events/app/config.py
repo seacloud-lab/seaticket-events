@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import json
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,14 @@ class _ConfigParser(object):
     
     @_check_type
     def get(self, key, default=None):
-        return os.getenv(key) if key in os.environ else self.yaml_configs.get(key, default)
+        if key in os.environ:
+            value = os.getenv(key)
+            try:
+                value = json.loads(value)
+            except:
+                pass
+            return value
+        return self.yaml_configs.get(key, default)
 
 CONF_DIR = os.getenv('CONF_PATH', '/opt/seaqa/conf/')
 yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEAQA_CONFIG_NAME', 'seaqa_config.yaml'))
