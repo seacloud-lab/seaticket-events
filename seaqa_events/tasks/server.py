@@ -2,7 +2,8 @@ from threading import Thread
 from waitress import serve
 
 from seaqa_events.tasks.request_handler import app as application
-from seaqa_events.tasks.task_manager import task_manager
+from seaqa_events.tasks.io_task_manager import io_task_manager
+from seaqa_events.tasks.analysis_task_manager import analysis_task_manager
 
 
 class TasksService(Thread):
@@ -10,9 +11,11 @@ class TasksService(Thread):
     def __init__(self, configs):
         Thread.__init__(self)
         self._parse_configs(configs)
-        
-        task_manager.init(self._workers, self.task_timeout, configs)
-        task_manager.run()
+
+        io_task_manager.init(self._workers, self.task_timeout, configs)
+        analysis_task_manager.init(self._workers, self.task_timeout, configs)
+        io_task_manager.run()
+        analysis_task_manager.run()
 
     def _parse_configs(self, configs):
         tasks_config = configs.get('TASKS', {})
