@@ -27,7 +27,6 @@ class AnalysisTaskManager(object):
 
     def has_running_task(self, project_uuid):
         """Check if the project has a running task"""
-        print(self.project_tasks_map)
         return project_uuid in self.project_tasks_map
 
     @log_function_call
