@@ -112,6 +112,3 @@ class AnalysisTaskManager(object):
             self.threads.append(t)
             t.daemon = True
             t.start()
-
-
-analysis_task_manager = AnalysisTaskManager()

@@ -2,12 +2,11 @@ import json
 import jwt
 import logging
 
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, current_app
 
 from seaqa_events.app.config import JWT_PRIVATE_KEY
 from seaqa_events.tasks import task_logger
 from seaqa_events.tasks.io_task_manager import io_task_manager
-from seaqa_events.tasks.analysis_task_manager import analysis_task_manager
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -37,6 +36,7 @@ def add_embedding_analysis_task():
     if not is_valid:
         return make_response((error, 403))
 
+    analysis_task_manager = current_app.config['app'].analysis_task_manager
     if analysis_task_manager.tasks_queue.full():
         task_logger.warning('tasks server busy, queue size: %d, current tasks: %s, threads is_alive: %s'
                                  % (analysis_task_manager.tasks_queue.qsize(), analysis_task_manager.current_task_info,
@@ -158,6 +158,7 @@ def query_embedding_analysis_task_status():
     if not is_valid:
         return make_response(({'error_msg': error}, 403))
 
+    analysis_task_manager = current_app.config['app'].analysis_task_manager
     task_id = request.args.get('task_id')
     if not analysis_task_manager.is_valid_task_id(task_id):
         return make_response(({'error_msg': 'task_id not found.'}, 404))
