@@ -28,7 +28,7 @@ def log_function_call(func):
     return wrapper
 
 
-class TaskManager(object):
+class IoTaskManager(object):
 
     def __init__(self):
         self.tasks_map = {}
@@ -44,18 +44,6 @@ class TaskManager(object):
 
     def is_valid_task_id(self, task_id):
         return task_id in self.tasks_map or task_id in self.task_results_map
-
-    @log_function_call
-    def add_embedding_analysis_task(self, project_uuid, connection_ids, username):
-        from seaqa_events.tasks import perform_embedding_analysis
-
-        task_id = str(uuid.uuid4())
-        task = (perform_embedding_analysis,
-                (project_uuid, connection_ids, username))
-        self.tasks_map[task_id] = task
-        self.tasks_queue.put(task_id)
-
-        return task_id
 
     @log_function_call
     def add_convert_kb_view_to_excel_task(self, project_uuid, view_id, username):
@@ -130,7 +118,7 @@ class TaskManager(object):
                     task_result['success'] = True
                 else:
                     task_result = {'success': True}
-                
+
                 self.task_results_map[task_id] = task_result
 
                 finish_time = time.time()
@@ -151,11 +139,8 @@ class TaskManager(object):
     def run(self):
         thread_num = self.conf['workers']
         for i in range(thread_num):
-            t_name = 'Tasks TaskManager Thread-' + str(i)
+            t_name = 'Tasks IoTaskManager Thread-' + str(i)
             t = threading.Thread(target=self.handle_task, name=t_name)
             self.threads.append(t)
-            t.setDaemon(True)
+            t.daemon = True
             t.start()
-
-
-task_manager = TaskManager()

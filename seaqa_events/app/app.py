@@ -2,6 +2,8 @@
 import time
 
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
+from seaqa_events.tasks.analysis_task_manager import AnalysisTaskManager
+from seaqa_events.tasks.io_task_manager import IoTaskManager
 from seaqa_events.tasks.server import TasksService
 
 
@@ -9,9 +11,14 @@ class App(object):
     def __init__(self, configs):
         # ai stats, listen redis and cron
         self.ai_stats_worker = AIStatsWorker(configs)
-        
+
+        # analysis task manager
+        self.analysis_task_manager = AnalysisTaskManager()
+        # io task manager
+        self.io_task_manager = IoTaskManager()
+
         # tasks service (handles async tasks like embedding analysis)
-        self.tasks_service = TasksService(configs)
+        self.tasks_service = TasksService(configs, self)
 
     def serve_forever(self):
         # ai stats worker
