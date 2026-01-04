@@ -144,6 +144,3 @@ class IoTaskManager(object):
             self.threads.append(t)
             t.daemon = True
             t.start()
-
-
-io_task_manager = IoTaskManager()

@@ -6,7 +6,6 @@ from flask import Flask, request, make_response, current_app
 
 from seaqa_events.app.config import JWT_PRIVATE_KEY
 from seaqa_events.tasks import task_logger
-from seaqa_events.tasks.io_task_manager import io_task_manager
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -80,6 +79,7 @@ def convert_kb_view_to_excel():
     if not is_valid:
         return make_response((error, 403))
 
+    io_task_manager = current_app.config['app'].io_task_manager
     if io_task_manager.tasks_queue.full():
         task_logger.warning('tasks server busy, queue size: %d, current tasks: %s, threads is_alive: %s'
                                  % (io_task_manager.tasks_queue.qsize(), io_task_manager.current_task_info,
@@ -117,6 +117,7 @@ def import_kb_from_excel():
     if not is_valid:
         return make_response((error, 403))
 
+    io_task_manager = current_app.config['app'].io_task_manager
     if io_task_manager.tasks_queue.full():
         task_logger.warning('tasks server busy, queue size: %d, current tasks: %s, threads is_alive: %s'
                                  % (io_task_manager.tasks_queue.qsize(), io_task_manager.current_task_info,
@@ -189,6 +190,7 @@ def query_kb_task_status():
     if not is_valid:
         return make_response(({'error_msg': error}, 403))
 
+    io_task_manager = current_app.config['app'].io_task_manager
     task_id = request.args.get('task_id')
     if not io_task_manager.is_valid_task_id(task_id):
         return make_response(({'error_msg': 'task_id not found.'}, 404))
