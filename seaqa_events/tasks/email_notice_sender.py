@@ -3,7 +3,7 @@ import os
 import logging
 from threading import Thread, Event
 
-from seaqa_events.utils import get_opt_from_conf_or_env, parse_bool, get_python_executable, run, parse_interval
+from seaqa_events.utils import get_python_executable, run
 from seaqa_events.app.config import SEAQA_WEB_DIR
 
 __all__ = [
@@ -26,22 +26,15 @@ class EmailNoticesSender(object):
     def _parse_config(self, configs):
         """parse send email related options from config file
         """
-        section_name = 'EMAIL_SENDER'
-        key_enabled = 'enabled'
-        key_interval = 'interval'
-        email_sender_config = configs.get(section_name, {})
+        email_sender_config = configs.get('EMAIL_SENDER', {})
         if not email_sender_config:
             return
-
-        # enabled
-        enabled = get_opt_from_conf_or_env(email_sender_config, key_enabled, default='true')
-        enabled = parse_bool(enabled)
-        self._enabled = enabled
+        self._enabled = email_sender_config.get('enabled', True)
         # interval
-        interval = get_opt_from_conf_or_env(email_sender_config, key_interval, default='60 * 60')
-        interval = parse_interval(interval, 60 * 60)
-        self._interval = interval
-
+        try:
+            self._interval = int(email_sender_config.get('interval', 60 * 60))
+        except Exception:
+            self._interval = 60 * 60
     def start(self):
         if not self.is_enabled():
             logging.warning('Can not start email notices sender: it is not enabled!')

@@ -42,56 +42,6 @@ def uuid_str_to_32_chars(project_uuid):
     else:
         return project_uuid
 
-
-def parse_bool(v):
-    if isinstance(v, bool):
-        return v
-
-    v = str(v).lower()
-
-    if v == '1' or v == 'true':
-        return True
-    else:
-        return False
-
-
-def get_opt_from_conf_or_env(config, key, env_key=None, default=None):
-    # Get option value from events.conf.
-    # If not specified in events.conf, check the environment variable.
-    try:
-        return config.get(key)
-    except (configparser.NoSectionError, configparser.NoOptionError):
-        if env_key is None:
-            return default
-        else:
-            return os.environ.get(env_key.upper(), default)
-
-def parse_interval(interval, default):
-    if isinstance(interval, (int, int)):
-        return interval
-
-    interval = interval.lower()
-
-    unit = 1
-    if interval.endswith('s'):
-        pass
-    elif interval.endswith('m'):
-        unit *= 60
-    elif interval.endswith('h'):
-        unit *= 60 * 60
-    elif interval.endswith('d'):
-        unit *= 60 * 60 * 24
-    else:
-        pass
-
-    val = int(interval.rstrip('smhd')) * unit
-    if val < 10:
-        logger.warning('insane interval %s', val)
-        return default
-    else:
-        return val
-
-
 def find_in_path(prog):
     if 'win32' in sys.platform:
         sep = ';'
