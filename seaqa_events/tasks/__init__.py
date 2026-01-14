@@ -42,6 +42,12 @@ def perform_embedding_analysis(project_uuid, connection_ids, username, start_yea
             column_names = ['_pk', 'title', 'ai_summary', 'ai_summary_vector']
             if connection_type == ConnectionType.GITHUB_ISSUE.value:
                 column_names.extend(['url', 'state'])
+            elif connection_type == ConnectionType.DISCOURSE_FORUM.value:
+                column_names.extend(['slug', 'topic_id'])
+            elif connection_type == ConnectionType.SEAFILE.value:
+                column_names.extend(['path'])
+            elif connection_type == ConnectionType.SITE.value:
+                column_names.extend(['url'])
 
             records = seadb_api.list_connection_records_with_columns(
                 project_uuid, connection_id, connection_type,
