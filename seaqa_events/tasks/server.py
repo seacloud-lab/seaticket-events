@@ -10,9 +10,7 @@ class TasksService(Thread):
         Thread.__init__(self)
         self._parse_configs(configs)
 
-        app.io_task_manager.init(self._workers, self.task_timeout, configs)
         app.analysis_task_manager.init(self._workers, self.task_timeout, configs)
-        app.io_task_manager.run()
         app.analysis_task_manager.run()
 
         application.config['app'] = app

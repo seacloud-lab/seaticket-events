@@ -2,9 +2,33 @@ import queue
 import threading
 import time
 import uuid
+import inspect
 
 from seaqa_events.tasks import task_logger
-from seaqa_events.tasks.io_task_manager import log_function_call
+
+
+def log_function_call(func):
+    def wrapper(*args, **kwargs):
+        func_name = func.__name__
+
+        signature = inspect.signature(func)
+        bound_args = signature.bind(*args, **kwargs)
+        bound_args.apply_defaults()
+
+        max_length_value = 100
+        args_str_list = []
+        for name, value in bound_args.arguments.items():
+            if name == 'self':
+                continue
+            args_str_list.append(
+                f"{name}: {str(value)[:max_length_value]+'...' if len(str(value)) > max_length_value else str(value)}"
+            )
+        args_repr = ', '.join(args_str_list)
+
+        task_logger.info("func: %s args: %s", func_name, args_repr)
+
+        return func(*args, **kwargs)
+    return wrapper
 
 
 class AnalysisTaskManager(object):
