@@ -70,5 +70,4 @@ AI_PRICES = configs.get('AI_PRICES', {})
 JWT_PRIVATE_KEY = configs.get('JWT_PRIVATE_KEY')
 SEADB_INNER_SERVER_URL = configs.get('SEADB_INNER_SERVER_URL', '')
 
-TEMP_EXPORT_VIEW_DIR = os.getenv('TEMP_EXPORT_VIEW_DIR', '/tmp/seaqa-io/export-view-to-excel/')
 SEAQA_WEB_DIR = os.getenv('SEAQA_WEB_DIR', '/data/dev/seaqa-web')
