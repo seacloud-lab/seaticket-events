@@ -62,11 +62,40 @@ class _ConfigParser(object):
                 pass
             return value
         return self.yaml_configs.get(key, default)
+    
+def get_llm_price(models):
+    if not models or not isinstance(models, list):
+        return {}
+
+    result = {}
+    for model in models:
+        if not isinstance(model, dict) or model.get('disable', False):
+            continue
+        if model.get('type') in ('proxy', 'other', 'hosted_vllm'):
+            required_fields = ('model', 'url', 'price')
+        else:
+            required_fields = ('model', 'key', 'price')
+        if not all(field in model for field in required_fields):
+            continue
+        if not isinstance(model['price'], dict):
+            if not isinstance(model['price'], (int, float)):
+                continue
+            model['price'] = {
+                'input': model['price'],
+                'output': 0
+            }
+        elif not 'input' not in model['price']:
+            continue
+        elif 'output' not in model['price']:
+            model['price']['output'] = 0 # compatible for embedding models
+        result[model['model']] = model['price']
+
+    return result
 
 CONF_DIR = os.getenv('CONF_PATH', '/opt/seaqa/conf/')
 yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEAQA_CONFIG_NAME', 'seaqa_config.yaml'))
 configs = _ConfigParser(yaml_file_path, 'seaqa-events')
-AI_PRICES = configs.get('AI_PRICES', {})
+AI_PRICES = get_llm_price(configs.get('LLM_MODELS', [])).update(get_llm_price([configs.get('EMBEDDING_MODEL', {})]))
 JWT_PRIVATE_KEY = configs.get('JWT_PRIVATE_KEY')
 SEADB_INNER_SERVER_URL = configs.get('SEADB_INNER_SERVER_URL', '')
 
