@@ -18,7 +18,7 @@ class NotificationCleaner(object):
     def __init__(self, configs):
         self._db_session_class = init_db_session_class(configs)
         self._enabled = True
-        self._interval = 60 * 60 * 24  # default 24h
+        self._interval = 60 * 60 * 24
         self._days = 30
         self._parse_config(configs)
 
@@ -67,20 +67,35 @@ class CleanNotificationsTimer(Thread):
     def _clean(self):
         cutoff_date = datetime.utcnow() - timedelta(days=self._days)
         session = self._db_session_class()
+        batch_size = 1000
+        total_user_deleted = 0
+        total_project_deleted = 0
         try:
-            sql_user = "DELETE FROM `user_notifications` WHERE `timestamp` < :cutoff_date"
-            sql_project = "DELETE FROM `project_notification` WHERE `timestamp` < :cutoff_date"
-            user_result = session.execute(text(sql_user), {'cutoff_date': cutoff_date})
-            project_result = session.execute(text(sql_project), {'cutoff_date': cutoff_date})
-            session.commit()
+            sql_user = "DELETE FROM `user_notifications` WHERE `timestamp` < :cutoff_date LIMIT :limit"
+            sql_project = "DELETE FROM `project_notification` WHERE `timestamp` < :cutoff_date LIMIT :limit"
+
+            while True:
+                user_result = session.execute(text(sql_user), {'cutoff_date': cutoff_date, 'limit': batch_size})
+                deleted = user_result.rowcount or 0
+                total_user_deleted += deleted
+                session.commit()
+                if deleted == 0:
+                    break
+
+            while True:
+                project_result = session.execute(text(sql_project), {'cutoff_date': cutoff_date, 'limit': batch_size})
+                deleted = project_result.rowcount or 0
+                total_project_deleted += deleted
+                session.commit()
+                if deleted == 0:
+                    break
             logger.info(
                 'Clean notifications finished, days=%s, user_deleted=%s, project_deleted=%s',
                 self._days,
-                getattr(user_result, 'rowcount', None),
-                getattr(project_result, 'rowcount', None),
+                total_user_deleted,
+                total_project_deleted,
             )
         except Exception as e:
             logger.exception('Failed to clean notifications: %s', e)
-            session.rollback()
         finally:
             session.close()
