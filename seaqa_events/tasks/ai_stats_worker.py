@@ -58,6 +58,7 @@ class AIStatsWorker:
         usage = usage_info.get('usage') or {}
         project_uuid = usage_info.get('project_uuid')
 
+        logger.info(AI_PRICES)
         if model not in AI_PRICES:
             logger.warning('model %s price not defined', model)
             return
