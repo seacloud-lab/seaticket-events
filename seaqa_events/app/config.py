@@ -96,6 +96,6 @@ yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEAQA_CONFIG_NAME', 'sea
 configs = _ConfigParser(yaml_file_path, 'seaqa-events')
 AI_PRICES = get_llm_price(configs.get('LLM_MODELS', []) + [configs.get('EMBEDDING_MODEL', {})])
 JWT_PRIVATE_KEY = configs.get('JWT_PRIVATE_KEY')
-SEADB_INNER_SERVER_URL = configs.get('SEADB_INNER_SERVER_URL', '')
+SEADB_SERVER_URL = configs.get('SEADB_SERVER_URL', 'http://seadb:8888')
 
 SEAQA_WEB_DIR = os.getenv('SEAQA_WEB_DIR', '/data/dev/seaqa-web')
