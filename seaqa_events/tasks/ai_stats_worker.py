@@ -38,6 +38,7 @@ class AIStatsWorker:
         self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
         # { project_uuid: org_id } - cache to avoid repeated database queries
         self.project_org_cache = {}
+        self.project_group_cache = {}
 
     def save_to_memory(self, usage_info):
         """
@@ -80,6 +81,15 @@ class AIStatsWorker:
                     logger.warning('project %s org_id not found', project_uuid)
                     return
         self.project_org_cache[project_uuid] = org_id
+        
+        if project_uuid in self.project_group_cache:
+            group_id = self.project_group_cache[project_uuid]
+        else:
+            group_id = self._get_group_id_by_project_uuid(project_uuid)
+            if group_id is None:
+                logger.warning('Workspace of project %s not found', project_uuid)
+                return
+        self.project_group_cache[project_uuid] = group_id
 
         # project_stats
         username = usage_info.get('username')
@@ -127,6 +137,7 @@ class AIStatsWorker:
         with self.stats_lock:
             project_stats = deepcopy(self.ai_usage_stats)
             project_org_cache = deepcopy(self.project_org_cache)
+            project_group_cache = deepcopy(self.project_group_cache)
             self.reset_stats()
 
         logger.debug('There are %s project stats', len(project_stats))
@@ -150,12 +161,13 @@ class AIStatsWorker:
         WHERE `id`=:id
         '''
         insert_sql = '''
-        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :username, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `group_id`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
+            group_id = project_group_cache.get(project_uuid)
             for (model, username), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
@@ -171,6 +183,7 @@ class AIStatsWorker:
                     'date': today,
                     'model': model,
                     'username': username,
+                    'group_id': group_id,
                     'org_id': org_id,
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
@@ -222,6 +235,24 @@ class AIStatsWorker:
                 if workspace:
                     org_id = workspace[0]
             return org_id
+        except Exception as e:
+            logger.exception(e)
+        finally:
+            session.close()
+    
+    def _get_group_id_by_project_uuid(self, project_uuid):
+        session = self._db_session_class()
+        try:
+            sql = """SELECT workspace_id FROM projects WHERE uuid=:project_uuid AND deleted=false"""
+            result = session.execute(text(sql), {'project_uuid': project_uuid}).fetchone()
+            if result:
+                workspace_id = result[0]
+                sql = """SELECT owner FROM workspaces WHERE id=:workspace_id AND deleted=false"""
+                workspace = session.execute(text(sql), {'workspace_id': workspace_id}).fetchone()
+                if workspace:
+                    if workspace[0].endswith('@seafile_group'):
+                        return int(workspace[0].rsplit('@seafile_group', 1)[0])
+                    return -1
         except Exception as e:
             logger.exception(e)
         finally:
