@@ -35,11 +35,10 @@ class AIStatsWorker:
         self._enabled = configs.get('AI_STATS', {}).get('enabled', True)
 
     def reset_stats(self):
-        self.org_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
-        # { project_uuid: { (model, username): {'input_tokens': int, 'output_tokens': int} } }
-        self.project_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
+        self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
         # { project_uuid: org_id } - cache to avoid repeated database queries
         self.project_org_cache = {}
+        self.project_group_cache = {}
 
     def save_to_memory(self, usage_info):
         """
@@ -82,15 +81,20 @@ class AIStatsWorker:
                     logger.warning('project %s org_id not found', project_uuid)
                     return
         self.project_org_cache[project_uuid] = org_id
-
-        # org_stats
-        self.org_stats[org_id][model]['input_tokens'] += input_tokens
-        self.org_stats[org_id][model]['output_tokens'] += output_tokens
+        
+        if project_uuid in self.project_group_cache:
+            group_id = self.project_group_cache[project_uuid]
+        else:
+            group_id = self._get_group_id_by_project_uuid(project_uuid)
+            if group_id is None:
+                logger.warning('Workspace of project %s not found', project_uuid)
+                return
+        self.project_group_cache[project_uuid] = group_id
 
         # project_stats
         username = usage_info.get('username')
         key = (model, username)
-        stats = self.project_stats[project_uuid][key]
+        stats = self.ai_usage_stats[project_uuid][key]
         stats['input_tokens'] += input_tokens
         stats['output_tokens'] += output_tokens
 
@@ -125,86 +129,53 @@ class AIStatsWorker:
                 last_message_time = datetime.now()
 
     def stats_worker(self):
-        if not self.org_stats and not self.project_stats:
-            logger.info('There are no stats')
+        if not self.ai_usage_stats:
+            logger.debug('There are no stats')
             return
 
         # Create atomic snapshot and reset
         with self.stats_lock:
-            org_stats = deepcopy(self.org_stats)
-            project_stats = deepcopy(self.project_stats)
+            project_stats = deepcopy(self.ai_usage_stats)
             project_org_cache = deepcopy(self.project_org_cache)
+            project_group_cache = deepcopy(self.project_group_cache)
             self.reset_stats()
 
-        logger.info('There are %s org stats', len(org_stats))
-        logger.info('There are %s project stats', len(project_stats))
+        logger.debug('There are %s project stats', len(project_stats))
 
-        month = datetime.today().replace(day=1).date()
         today = datetime.today().date()
         now = datetime.now()
 
-        # Prepare team/org statistics (stats_ai_by_team)
-        team_data = []
-        team_sql = '''
-        INSERT INTO `stats_ai_by_team`(`org_id`, `month`, `model`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:org_id, :month, :model, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
-        ON DUPLICATE KEY UPDATE `input_tokens`=`input_tokens`+VALUES(`input_tokens`),
-                                `output_tokens`=`output_tokens`+VALUES(`output_tokens`),
-                                `cost`=`cost`+VALUES(`cost`),
-                                `updated_at`=VALUES(`updated_at`)
-        '''
-        for org_id, models_dict in org_stats.items():
-            for model, usage in models_dict.items():
-                input_tokens = usage.get('input_tokens') or 0
-                output_tokens = usage.get('output_tokens') or 0
-
-                input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
-                output_tokens_price = AI_PRICES[model].get('output_tokens_1k') or 0
-                cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
-
-                logger.info('org %s model %s, input_tokens %s, output_tokens %s, cost %s',
-                           org_id, model, input_tokens, output_tokens, cost)
-
-                team_data.append({
-                    'org_id': org_id,
-                    'month': month,
-                    'model': model,
-                    'input_tokens': input_tokens,
-                    'output_tokens': output_tokens,
-                    'cost': cost,
-                    'created_at': now,
-                    'updated_at': now
-                })
-
-        # Prepare project statistics (stats_ai_by_project)
-        project_select_sql = '''
-        SELECT `id` FROM `stats_ai_by_project`
+        # Prepare statistics (ai_usage_statistics)
+        # due to only has key `id` is unique, so the update will be performed using multiple SQL statements.
+        select_sql = '''
+        SELECT `id` FROM `ai_usage_statistics`
         WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `username`=:username
         LIMIT 1
         '''
-        project_update_sql = '''
-        UPDATE `stats_ai_by_project`
+        update_sql = '''
+        UPDATE `ai_usage_statistics`
         SET `input_tokens`=`input_tokens`+:input_tokens,
             `output_tokens`=`output_tokens`+:output_tokens,
             `cost`=`cost`+:cost,
             `updated_at`=:updated_at
         WHERE `id`=:id
         '''
-        project_insert_sql = '''
-        INSERT INTO `stats_ai_by_project`(`project_uuid`, `date`, `model`, `username`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :username, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        insert_sql = '''
+        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `group_id`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
+            group_id = project_group_cache.get(project_uuid)
             for (model, username), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
-                input_tokens_price = AI_PRICES[model].get('input_tokens_1k') or 0
-                output_tokens_price = AI_PRICES[model].get('output_tokens_1k') or 0
+                input_tokens_price = AI_PRICES[model].get('input', 0)
+                output_tokens_price = AI_PRICES[model].get('output', 0)
                 cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
 
-                logger.info('project %s model %s username %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
+                logger.debug('project %s model %s username %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
                            project_uuid, model, username, org_id, input_tokens, output_tokens, cost)
 
                 project_data.append({
@@ -212,6 +183,7 @@ class AIStatsWorker:
                     'date': today,
                     'model': model,
                     'username': username,
+                    'group_id': group_id,
                     'org_id': org_id,
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
@@ -223,12 +195,10 @@ class AIStatsWorker:
         # Execute database operations
         session = self._db_session_class()
         try:
-            if team_data:
-                session.execute(text(team_sql), team_data)
 
             # For project stats: check existence then update or insert
             for data in project_data:
-                result = session.execute(text(project_select_sql), {
+                result = session.execute(text(select_sql), {
                     'project_uuid': data['project_uuid'],
                     'date': data['date'],
                     'model': data['model'],
@@ -236,7 +206,7 @@ class AIStatsWorker:
                 }).fetchone()
 
                 if result:
-                    session.execute(text(project_update_sql), {
+                    session.execute(text(update_sql), {
                         'id': result[0],
                         'input_tokens': data['input_tokens'],
                         'output_tokens': data['output_tokens'],
@@ -244,7 +214,7 @@ class AIStatsWorker:
                         'updated_at': data['updated_at']
                     })
                 else:
-                    session.execute(text(project_insert_sql), data)
+                    session.execute(text(insert_sql), data)
 
             session.commit()
         except Exception as e:
@@ -269,6 +239,24 @@ class AIStatsWorker:
             logger.exception(e)
         finally:
             session.close()
+    
+    def _get_group_id_by_project_uuid(self, project_uuid):
+        session = self._db_session_class()
+        try:
+            sql = """SELECT workspace_id FROM projects WHERE uuid=:project_uuid AND deleted=false"""
+            result = session.execute(text(sql), {'project_uuid': project_uuid}).fetchone()
+            if result:
+                workspace_id = result[0]
+                sql = """SELECT owner FROM workspaces WHERE id=:workspace_id AND deleted=false"""
+                workspace = session.execute(text(sql), {'workspace_id': workspace_id}).fetchone()
+                if workspace:
+                    if workspace[0].endswith('@seafile_group'):
+                        return int(workspace[0].rsplit('@seafile_group', 1)[0])
+                    return -1
+        except Exception as e:
+            logger.exception(e)
+        finally:
+            session.close()
 
     def stats(self):
         """Scheduler for periodic statistics aggregation."""
@@ -276,7 +264,7 @@ class AIStatsWorker:
         # Fire every 1 minute
         @sched.scheduled_job('cron', day_of_week='*', hour='*', minute='*/1', misfire_grace_time=30, max_instances=1)
         def timed_job():
-            logger.info('Starts to stats ai calls in memory...')
+            logger.debug('Starts to stats ai calls in memory...')
             self.stats_worker()
 
         sched.start()
@@ -287,14 +275,12 @@ class AIStatsWorker:
         # Fire at 0 o'clock every day
         @sched.scheduled_job('cron', day_of_week='*', hour='0', misfire_grace_time=600)
         def timed_job():
-            logger.info('Starts to clean old stats ai...')
+            logger.debug('Starts to clean old stats ai...')
             session = self._db_session_class()
-            sql1 = "DELETE FROM `stats_ai_by_team` WHERE `month` < :clean_month"
-            sql2 = "DELETE FROM `stats_ai_by_project` WHERE `date` < :clean_month"
+            sql = "DELETE FROM `ai_usage_statistics` WHERE `date` < :clean_month"
             clean_month = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-01')
             try:
-                session.execute(text(sql1), {'clean_month': clean_month})
-                session.execute(text(sql2), {'clean_month': clean_month})
+                session.execute(text(sql), {'clean_month': clean_month})
                 session.commit()
             except Exception as e:
                 logger.exception(e)
