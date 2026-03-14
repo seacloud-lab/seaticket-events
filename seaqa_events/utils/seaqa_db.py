@@ -142,22 +142,12 @@ class SeaqaDB(object):
             sql = "SELECT knowledge_base_indexed_at FROM projects WHERE uuid=:project_uuid AND deleted=false"
             return session.execute(text(sql), {'project_uuid': project_uuid}).fetchone()
 
-    def get_recently_updated_connections(self, days=7):
-        with self.db_session_class() as session:
-            sql = """SELECT pc.id, pc.type, pc.project_uuid, pc.ai_indexed_at, pc.content_vector_indexed_at
-                     FROM project_connection pc
-                     INNER JOIN projects p ON p.uuid = pc.project_uuid
-                     WHERE p.deleted = false 
-                     AND pc.deleted = false
-                     AND pc.last_sync_time >= DATE_SUB(NOW(), INTERVAL :days DAY)"""
-            return session.execute(text(sql), {'days': days}).fetchall()
-
-    def list_active_projects_with_issue_connections(self):
-        """Return all active projects with their issue-type connections (github_issue, discourse_forum, email)."""
+    def list_projects_with_issue_connections(self):
         with self.db_session_class() as session:
             sql = text("""
                 SELECT p.uuid AS project_uuid, w.org_id,
-                       pc.id AS connection_id, pc.type AS connection_type
+                       pc.id AS connection_id, pc.type AS connection_type,
+                       pc.status AS connection_status
                 FROM projects p
                 INNER JOIN workspaces w ON p.workspace_id = w.id
                 LEFT JOIN project_connection pc
@@ -169,34 +159,42 @@ class SeaqaDB(object):
             """)
             return session.execute(sql).fetchall()
 
-    def upsert_project_issues_statistics(self, project_uuid, org_id,
-                                         tickets_count, github_issues_count,
-                                         forum_threads_count, email_threads_count):
-        total = tickets_count + github_issues_count + forum_threads_count + email_threads_count
+    def list_projects_with_issue_connections_by_uuids(self, project_uuids):
+        if not project_uuids:
+            return []
+
+        with self.db_session_class() as session:
+            project_ids_str = ','.join([f"'{uuid_str_to_32_chars(uuid)}'" for uuid in project_uuids])
+            sql = text(f"""
+                SELECT p.uuid AS project_uuid, w.org_id,
+                       pc.id AS connection_id, pc.type AS connection_type,
+                       pc.status AS connection_status
+                FROM projects p
+                INNER JOIN workspaces w ON p.workspace_id = w.id
+                LEFT JOIN project_connection pc
+                    ON pc.project_uuid = p.uuid
+                    AND pc.deleted = false
+                    AND pc.type IN ('github_issue', 'discourse_forum', 'email')
+                WHERE p.deleted = false
+                  AND p.uuid IN ({project_ids_str})
+                ORDER BY p.uuid
+            """)
+            return session.execute(sql).fetchall()
+
+    def upsert_project_issues_statistics_batch(self, project_stats):
+        if not project_stats:
+            return
+
         with self.db_session_class() as session:
             sql = text("""
                 INSERT INTO project_issues_statistics
-                    (project_uuid, org_id, tickets_count, github_issues_count,
-                     forum_threads_count, email_threads_count, total_issues_count, updated_at)
+                    (project_uuid, org_id, total_issues_count, updated_at)
                 VALUES
-                    (:project_uuid, :org_id, :tickets_count, :github_issues_count,
-                     :forum_threads_count, :email_threads_count, :total, NOW(6))
+                    (:project_uuid, :org_id, :total_issues_count, :updated_at)
                 ON DUPLICATE KEY UPDATE
                     org_id = VALUES(org_id),
-                    tickets_count = VALUES(tickets_count),
-                    github_issues_count = VALUES(github_issues_count),
-                    forum_threads_count = VALUES(forum_threads_count),
-                    email_threads_count = VALUES(email_threads_count),
                     total_issues_count = VALUES(total_issues_count),
                     updated_at = VALUES(updated_at)
             """)
-            session.execute(sql, {
-                'project_uuid': project_uuid,
-                'org_id': org_id,
-                'tickets_count': tickets_count,
-                'github_issues_count': github_issues_count,
-                'forum_threads_count': forum_threads_count,
-                'email_threads_count': email_threads_count,
-                'total': total,
-            })
+            session.execute(sql, project_stats)
             session.commit()
