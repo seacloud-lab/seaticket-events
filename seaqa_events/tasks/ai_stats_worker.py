@@ -16,6 +16,7 @@ from seaqa_events.app.config import AI_PRICES
 from seaqa_events.app.event_redis import RedisClient
 from seaqa_events.db import init_db_session_class
 from seaqa_events.utils import uuid_str_to_32_chars
+from seaqa_events.utils.constant import AIScenario
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,13 @@ class AIStatsWorker:
             output_tokens = 0
 
         org_id = usage_info.get('org_id')
+        scenario = usage_info.get('scenario')
+        if not isinstance(scenario, str):
+            scenario = AIScenario.UNKNOWN.value
+        else:
+            scenario = scenario.strip().lower() or AIScenario.UNKNOWN.value
+            if not AIScenario.is_valid(scenario):
+                scenario = AIScenario.UNKNOWN.value
         project_uuid = uuid_str_to_32_chars(project_uuid)
         if org_id is None:
             if project_uuid in self.project_org_cache:
@@ -93,7 +101,7 @@ class AIStatsWorker:
 
         # project_stats
         username = usage_info.get('username')
-        key = (model, username)
+        key = (model, username, scenario)
         stats = self.ai_usage_stats[project_uuid][key]
         stats['input_tokens'] += input_tokens
         stats['output_tokens'] += output_tokens
@@ -149,7 +157,7 @@ class AIStatsWorker:
         # due to only has key `id` is unique, so the update will be performed using multiple SQL statements.
         select_sql = '''
         SELECT `id` FROM `ai_usage_statistics`
-        WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `username`=:username
+        WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `username`=:username AND `scenario`=:scenario
         LIMIT 1
         '''
         update_sql = '''
@@ -161,22 +169,22 @@ class AIStatsWorker:
         WHERE `id`=:id
         '''
         insert_sql = '''
-        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `group_id`, `org_id`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `group_id`, `org_id`, `scenario`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
             group_id = project_group_cache.get(project_uuid)
-            for (model, username), usage in stats_dict.items():
+            for (model, username, scenario), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 input_tokens_price = AI_PRICES[model].get('input', 0)
                 output_tokens_price = AI_PRICES[model].get('output', 0)
                 cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
 
-                logger.debug('project %s model %s username %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
-                           project_uuid, model, username, org_id, input_tokens, output_tokens, cost)
+                logger.debug('project %s model %s username %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
+                           project_uuid, model, username, scenario, org_id, input_tokens, output_tokens, cost)
 
                 project_data.append({
                     'project_uuid': project_uuid,
@@ -185,6 +193,7 @@ class AIStatsWorker:
                     'username': username,
                     'group_id': group_id,
                     'org_id': org_id,
+                    'scenario': scenario,
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
                     'cost': cost,
@@ -202,7 +211,8 @@ class AIStatsWorker:
                     'project_uuid': data['project_uuid'],
                     'date': data['date'],
                     'model': data['model'],
-                    'username': data['username']
+                    'username': data['username'],
+                    'scenario': data['scenario'],
                 }).fetchone()
 
                 if result:
