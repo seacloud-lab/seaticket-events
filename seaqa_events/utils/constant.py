@@ -8,6 +8,17 @@ class ConnectionType(Enum):
     SITE = 'site'
     SEAFILE = 'seafile'
 
+class AIScenario(Enum):
+    SUMMARY = 'summary'
+    AGENT = 'agent'
+    CHAT = 'chat'
+    SEARCH = 'search'
+    RECORD_GENERATION = 'record_generation'
+    UNKNOWN = 'unknown'
+
+    @classmethod
+    def is_valid(cls, value):
+        return value in {item.value for item in cls}
 
 MAX_EMBEDDING_ANALYSIS_RECORDS = 100000
 
