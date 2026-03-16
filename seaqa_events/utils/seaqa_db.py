@@ -142,23 +142,6 @@ class SeaqaDB(object):
             sql = "SELECT knowledge_base_indexed_at FROM projects WHERE uuid=:project_uuid AND deleted=false"
             return session.execute(text(sql), {'project_uuid': project_uuid}).fetchone()
 
-    def list_projects_with_issue_connections(self):
-        with self.db_session_class() as session:
-            sql = text("""
-                SELECT p.uuid AS project_uuid, w.org_id,
-                       pc.id AS connection_id, pc.type AS connection_type,
-                       pc.status AS connection_status
-                FROM projects p
-                INNER JOIN workspaces w ON p.workspace_id = w.id
-                LEFT JOIN project_connection pc
-                    ON pc.project_uuid = p.uuid
-                    AND pc.deleted = false
-                    AND pc.type IN ('github_issue', 'discourse_forum', 'email')
-                WHERE p.deleted = false
-                ORDER BY p.uuid
-            """)
-            return session.execute(sql).fetchall()
-
     def list_projects_with_issue_connections_by_uuids(self, project_uuids):
         if not project_uuids:
             return []

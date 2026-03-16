@@ -59,7 +59,6 @@ class CountIssuesTimer(Thread):
         self.seaqa_db = SeaqaDB(self._db_session_class)
         self.seadb_api = SeaDBAPI(username='seaqa-events')
         self._upsert_batch_size = 50
-        self._last_count_time = None
         self._pending_project_uuids = set()
         self._pending_lock = Lock()
         self.finished = Event()
@@ -70,12 +69,8 @@ class CountIssuesTimer(Thread):
 
         while not self.finished.is_set():
             self.finished.wait(self._interval)
-            if not self._last_count_time:
-                self._count_all_projects()
-            else:
-                self._count_event_projects()
+            self._count_event_projects()
 
-            self._last_count_time = datetime.datetime.now(datetime.UTC)
 
     def cancel(self):
         self.finished.set()
@@ -110,15 +105,6 @@ class CountIssuesTimer(Thread):
         except Exception as e:
             logger.warning('Failed to count tickets for project %s: %s', project_uuid, e)
             return 0
-
-    def _count_all_projects(self):
-        try:
-            rows = self.seaqa_db.list_projects_with_issue_connections()
-        except Exception as e:
-            logger.error('Failed to list projects with issue connections: %s', e)
-            return
-
-        self._count_projects(rows)
 
     def _count_event_projects(self):
         with self._pending_lock:
