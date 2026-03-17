@@ -8,7 +8,7 @@ from copy import deepcopy
 
 from seaqa_events.app.event_redis import RedisClient
 from seaqa_events.db import init_db_session_class
-from seaqa_events.utils import uuid_str_to_32_chars
+from seaqa_events.utils import uuid_str_to_32_chars, get_connection_table_name
 from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.seadb_api import SeaDBAPI
 
@@ -106,6 +106,21 @@ class CountIssuesTimer(Thread):
             logger.warning('Failed to count tickets for project %s: %s', project_uuid, e)
             return 0
 
+    def _get_email_threads_count(self, project_uuid, connection_id):
+        table_name = get_connection_table_name('email', connection_id)
+        sql = f"SELECT COUNT(*) as count FROM `{table_name}`"
+        try:
+            response = self.seadb_api.query_rows(project_uuid, sql)
+            if response and 'results' in response and response['results']:
+                return int(response['results'][0].get('count', 0))
+            return 0
+        except Exception as e:
+            logger.warning(
+                'Failed to count email threads for project %s, connection %s: %s',
+                project_uuid, connection_id, e
+            )
+            return 0
+
     def _count_event_projects(self):
         with self._pending_lock:
             project_uuids = deepcopy(self._pending_project_uuids)
@@ -137,6 +152,7 @@ class CountIssuesTimer(Thread):
             proj['org_id'] = row.org_id if row.org_id is not None else -1
 
             conn_type = row.connection_type
+            conn_id = row.connection_id
             status = row.connection_status
             conn_total_records = 0
             if status:
@@ -146,7 +162,9 @@ class CountIssuesTimer(Thread):
                 except Exception:
                     conn_total_records = 0
 
-            if conn_type in ISSUE_CONNECTION_TYPES:
+            if conn_type == 'email':
+                proj['connection_records_total'] += self._get_email_threads_count(project_uuid, conn_id)
+            elif conn_type in ISSUE_CONNECTION_TYPES:
                 proj['connection_records_total'] += conn_total_records
 
         updated = 0
