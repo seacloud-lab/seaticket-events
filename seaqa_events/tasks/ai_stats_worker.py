@@ -181,7 +181,7 @@ class AIStatsWorker:
                 output_tokens = usage.get('output_tokens') or 0
                 input_tokens_price = AI_PRICES[model].get('input', 0)
                 output_tokens_price = AI_PRICES[model].get('output', 0)
-                cost = input_tokens_price * (input_tokens / 1000) + output_tokens_price * (output_tokens / 1000)
+                cost = input_tokens_price * (input_tokens / 1e6) + output_tokens_price * (output_tokens / 1e6)
 
                 logger.debug('project %s model %s username %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
                            project_uuid, model, username, scenario, org_id, input_tokens, output_tokens, cost)
