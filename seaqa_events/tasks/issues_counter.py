@@ -3,12 +3,12 @@ import datetime
 import json
 import time
 from collections import defaultdict
-from threading import Thread, Event, Lock
 from copy import deepcopy
+from threading import Thread, Event, Lock
 
 from seaqa_events.app.event_redis import RedisClient
 from seaqa_events.db import init_db_session_class
-from seaqa_events.utils import uuid_str_to_32_chars, get_connection_table_name
+from seaqa_events.utils import uuid_str_to_32_chars
 from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.seadb_api import SeaDBAPI
 
@@ -19,6 +19,17 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+ISSUE_COUNTER_CHANNEL = 'connection_update'
+# 1 day in seconds, if no message received for this duration, trigger redis reconnection logic
+NO_MSG_TIMEOUT = 60 * 60 * 24 
+# Redis reconnection sleep time: 1 second to avoid frequent reconnection attempts
+RECONNECT_SLEEP = 1
+
+
+class NoMessageException(Exception):
+    pass
 
 
 class IssuesCounter(object):
@@ -59,41 +70,91 @@ class CountIssuesTimer(Thread):
         self.seaqa_db = SeaqaDB(self._db_session_class)
         self.seadb_api = SeaDBAPI(username='seaqa-events')
         self._upsert_batch_size = 50
-        self._pending_project_uuids = set()
+        self._pending_projects = defaultdict(lambda: {
+            'connection_count': 0,
+            'ticket_count': 0,
+        })
         self._pending_lock = Lock()
         self.finished = Event()
 
     def run(self):
-        Thread(target=self._listen_issue_stat_events, args=('issue_statistics_update',), daemon=True).start()
-        Thread(target=self._listen_issue_stat_events, args=('ticket_update',), daemon=True).start()
-
+        Thread(target=self._listen_issue_stat_events, daemon=True).start()
         while not self.finished.is_set():
             self.finished.wait(self._interval)
             self._count_event_projects()
+
+    def _listen_issue_stat_events(self):
+        subscriber = None
+        message_check_time = 0
+        while not self.finished.is_set():
+            if subscriber is None:
+                try:
+                    subscriber = self._redis_client.get_subscriber(ISSUE_COUNTER_CHANNEL)
+                    message_check_time = time.time()
+                except Exception as e:
+                    logger.warning('Failed to subscribe %s event channel: %s', ISSUE_COUNTER_CHANNEL, e)
+                    time.sleep(RECONNECT_SLEEP)
+                    continue
+
+            try:
+                message = subscriber.get_message()
+                if not message:
+                    no_msg_duration = time.time() - message_check_time
+                    if no_msg_duration > NO_MSG_TIMEOUT:
+                        logger.warning('No message received for %s seconds, triggering redis reconnection', NO_MSG_TIMEOUT)
+                        raise NoMessageException('No message received for %s seconds' % NO_MSG_TIMEOUT)
+                    time.sleep(RECONNECT_SLEEP)
+                    continue
+
+                message_check_time = time.time()
+                payload = json.loads(message.get('data') or '{}')
+                self._enqueue_project_delta(payload)
+
+            except NoMessageException as e:
+                logger.warning('Failed to handle %s event: %s', ISSUE_COUNTER_CHANNEL, e)
+                try:
+                    subscriber.close()
+                except Exception:
+                    pass
+                subscriber = None
+            except Exception as e:
+                logger.warning('Failed to handle %s event: %s', ISSUE_COUNTER_CHANNEL, e)
+                try:
+                    subscriber.close()
+                except Exception:
+                    pass
+                subscriber = None
+                time.sleep(RECONNECT_SLEEP)
 
 
     def cancel(self):
         self.finished.set()
 
-    def _listen_issue_stat_events(self, channel):
-        subscriber = self._redis_client.get_subscriber(channel)
-        while not self.finished.is_set():
-            try:
-                message = subscriber.get_message()
-                if message is None:
-                    time.sleep(0.5)
-                    continue
+    def _enqueue_project_delta(self, payload):
+        project_uuid = payload.get('project_uuid')
+        issue_type = payload.get('type')
 
-                payload = json.loads(message.get('data') or '{}')
-                project_uuid = payload.get('project_uuid')
-                if not project_uuid:
-                    continue
+        if not project_uuid:
+            return
+        if issue_type not in ISSUE_CONNECTION_TYPES and issue_type != 'ticket':
+            return
 
-                with self._pending_lock:
-                    self._pending_project_uuids.add(uuid_str_to_32_chars(project_uuid))
-            except Exception as e:
-                logger.warning('Failed to handle %s event: %s', channel, e)
-                subscriber = self._redis_client.get_subscriber(channel)
+        try:
+            add_count = int(payload.get('add', 0))
+            delete_count = int(payload.get('delete', 0))
+        except Exception:
+            return
+
+        delta = add_count - delete_count
+        if delta == 0:
+            return
+
+        with self._pending_lock:
+            project_delta = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
+            if issue_type == 'ticket':
+                project_delta['ticket_count'] += delta
+            else:
+                project_delta['connection_count'] += delta
 
     def _get_tickets_count(self, project_uuid):
         sql = "SELECT COUNT(*) as count FROM `tickets`"
@@ -107,7 +168,7 @@ class CountIssuesTimer(Thread):
             return 0
 
     def _get_email_threads_count(self, project_uuid, connection_id):
-        table_name = get_connection_table_name('email', connection_id)
+        table_name = f"email_thread_{connection_id}"
         sql = f"SELECT COUNT(*) as count FROM `{table_name}`"
         try:
             response = self.seadb_api.query_rows(project_uuid, sql)
@@ -123,32 +184,45 @@ class CountIssuesTimer(Thread):
 
     def _count_event_projects(self):
         with self._pending_lock:
-            project_uuids = deepcopy(self._pending_project_uuids)
-            self._pending_project_uuids.clear()
-        if not project_uuids:
+            pending_projects = deepcopy(self._pending_projects)
+            self._pending_projects.clear()
+
+        if not pending_projects:
             logger.info('No projects need issues statistics update')
             return
+
+        project_uuids = list(pending_projects.keys())
         try:
-            project_rows = self.seaqa_db.list_projects_with_issue_connections_by_uuids(project_uuids)
+            existed_stats_rows = self.seaqa_db.get_project_issues_statistics_by_uuids(project_uuids)
         except Exception as e:
             logger.error('Failed to count issue statistics for updated projects: %s', e)
             return
 
-        self._count_projects(project_rows)
+        existed_stats_map = {
+            uuid_str_to_32_chars(row.project_uuid): row for row in existed_stats_rows
+        }
 
-    def _count_projects(self, rows):
-        if not rows:
-            logger.info('No projects need issues statistics update')
-            return
+        need_init_uuids = [uuid for uuid in project_uuids if uuid not in existed_stats_map]
+        init_stats_map = self._build_initial_project_stats(need_init_uuids)
+
+        self._upsert_project_issue_stats(pending_projects, existed_stats_map, init_stats_map)
+
+    def _build_initial_project_stats(self, project_uuids):
+        if not project_uuids:
+            return {}
+        try:
+            rows = self.seaqa_db.list_projects_with_issue_connections_by_uuids(project_uuids)
+        except Exception as e:
+            logger.error('Failed to initialize issue statistics for projects: %s', e)
+            return {}
 
         projects = defaultdict(lambda: {
             'org_id': -1,
-            'connection_records_total': 0,
+            'connection_issues_count': 0,
         })
 
         for row in rows:
-            project_uuid = row.project_uuid
-            proj = projects[project_uuid]
+            proj = projects[uuid_str_to_32_chars(row.project_uuid)]
             proj['org_id'] = row.org_id if row.org_id is not None else -1
 
             conn_type = row.connection_type
@@ -162,28 +236,55 @@ class CountIssuesTimer(Thread):
                 except Exception:
                     conn_total_records = 0
 
-            if conn_type == 'email':
-                proj['connection_records_total'] += self._get_email_threads_count(project_uuid, conn_id)
+            if conn_type == 'email' and conn_id:
+                proj['connection_issues_count'] += self._get_email_threads_count(project_uuid, conn_id)
             elif conn_type in ISSUE_CONNECTION_TYPES:
-                proj['connection_records_total'] += conn_total_records
+                proj['connection_issues_count'] += conn_total_records
 
+        init_stats = {}
+        for project_uuid, proj in projects.items():
+            init_stats[project_uuid] = {
+                'org_id': proj['org_id'],
+                'connection_issues_count': int(proj['connection_issues_count']),
+                'ticket_issues_count': int(self._get_tickets_count(project_uuid)),
+            }
+
+        return init_stats
+
+    def _upsert_project_issue_stats(self, pending_projects, existed_stats_map, init_stats_map):
         updated = 0
         updated_at = datetime.datetime.now(datetime.UTC)
         project_stats = []
-        for project_uuid, proj in projects.items():
-            try:
-                tickets_count = self._get_tickets_count(project_uuid)
-                total = tickets_count + proj['connection_records_total']
-                project_stats.append({
-                    'project_uuid': project_uuid,
-                    'org_id': proj['org_id'],
-                    'total_issues_count': total,
-                    'updated_at': updated_at,
-                })
-                updated += 1
-            except Exception as e:
-                logger.error('Failed to count issues for project %s: %s', project_uuid, e)
-            
+
+        for project_uuid, delta in pending_projects.items():
+            row = existed_stats_map.get(project_uuid)
+            if row:
+                org_id = row.org_id if row.org_id is not None else -1
+                base_connection_count = int(getattr(row, 'connection_issues_count', 0))
+                base_ticket_count = int(getattr(row, 'ticket_issues_count', 0))
+            else:
+                init_stats = init_stats_map.get(project_uuid)
+                if not init_stats:
+                    logger.warning('Skip project %s issue stats update: no base stats found', project_uuid)
+                    continue
+                org_id = init_stats.get('org_id', -1)
+                base_connection_count = int(init_stats.get('connection_issues_count', 0))
+                base_ticket_count = int(init_stats.get('ticket_issues_count', 0))
+
+            connection_count = base_connection_count + int(delta.get('connection_count', 0))
+            ticket_count = base_ticket_count + int(delta.get('ticket_count', 0))
+            total_count = connection_count + ticket_count
+
+            project_stats.append({
+                'project_uuid': project_uuid,
+                'org_id': org_id,
+                'connection_issues_count': connection_count,
+                'ticket_issues_count': ticket_count,
+                'total_issues_count': total_count,
+                'updated_at': updated_at,
+            })
+            updated += 1
+
             if len(project_stats) >= self._upsert_batch_size:
                 try:
                     self.seaqa_db.upsert_project_issues_statistics_batch(project_stats)
@@ -198,5 +299,5 @@ class CountIssuesTimer(Thread):
             except Exception as e:
                 logger.error('Failed to batch upsert issues statistics: %s', e)
                 return
-        
-        logger.info('Issues statistics updated for %d/%d projects', updated, len(projects))
+
+        logger.info('Issues statistics updated for %d/%d projects', updated, len(pending_projects))

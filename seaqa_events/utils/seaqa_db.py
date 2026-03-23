@@ -164,6 +164,21 @@ class SeaqaDB(object):
             """)
             return session.execute(sql).fetchall()
 
+    def get_project_issues_statistics_by_uuids(self, project_uuids):
+        if not project_uuids:
+            return []
+
+        with self.db_session_class() as session:
+            project_ids_str = ','.join([f"'{uuid_str_to_32_chars(uuid)}'" for uuid in project_uuids])
+            sql = text(f"""
+                SELECT project_uuid, org_id,
+                       connection_issues_count, ticket_issues_count,
+                       total_issues_count
+                FROM project_issues_statistics
+                WHERE project_uuid IN ({project_ids_str})
+            """)
+            return session.execute(sql).fetchall()
+
     def upsert_project_issues_statistics_batch(self, project_stats):
         if not project_stats:
             return
@@ -171,11 +186,15 @@ class SeaqaDB(object):
         with self.db_session_class() as session:
             sql = text("""
                 INSERT INTO project_issues_statistics
-                    (project_uuid, org_id, total_issues_count, updated_at)
+                    (project_uuid, org_id, connection_issues_count, ticket_issues_count,
+                     total_issues_count, updated_at)
                 VALUES
-                    (:project_uuid, :org_id, :total_issues_count, :updated_at)
+                    (:project_uuid, :org_id, :connection_issues_count, :ticket_issues_count,
+                     :total_issues_count, :updated_at)
                 ON DUPLICATE KEY UPDATE
                     org_id = VALUES(org_id),
+                    connection_issues_count = VALUES(connection_issues_count),
+                    ticket_issues_count = VALUES(ticket_issues_count),
                     total_issues_count = VALUES(total_issues_count),
                     updated_at = VALUES(updated_at)
             """)
