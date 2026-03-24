@@ -145,19 +145,19 @@ class CountIssuesTimer(Thread):
         except Exception:
             return
 
-        delta = add_count - delete_count
-        if delta == 0:
+        if add_count == 0 and delete_count == 0:
             return
 
         with self._pending_lock:
-            project_delta = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
+            project_pending = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
+            delta = add_count - delete_count
             if issue_type == 'ticket':
-                project_delta['ticket_count'] += delta
+                project_pending['ticket_count'] += delta
             else:
-                project_delta['connection_count'] += delta
+                project_pending['connection_count'] += delta
 
     def _get_tickets_count(self, project_uuid):
-        sql = "SELECT COUNT(*) as count FROM `tickets`"
+        sql = "SELECT COUNT(*) as count FROM `tickets` WHERE (`deleted` = False OR `deleted` IS NULL)"
         try:
             response = self.seadb_api.query_rows(project_uuid, sql)
             if response and 'results' in response and response['results']:
@@ -202,12 +202,17 @@ class CountIssuesTimer(Thread):
             uuid_str_to_32_chars(row.project_uuid): row for row in existed_stats_rows
         }
 
-        need_init_uuids = [uuid for uuid in project_uuids if uuid not in existed_stats_map]
-        init_stats_map = self._build_initial_project_stats(need_init_uuids)
+        projects_need_connection_recount = []
+        for project_uuid, pending in pending_projects.items():
+            row = existed_stats_map.get(project_uuid)
+            if int(pending.get('connection_count', 0)) != 0 or row is None:
+                projects_need_connection_recount.append(project_uuid)
 
-        self._upsert_project_issue_stats(pending_projects, existed_stats_map, init_stats_map)
+        connection_stats_map = self._build_project_connection_stats(projects_need_connection_recount)
 
-    def _build_initial_project_stats(self, project_uuids):
+        self._upsert_project_issue_stats(pending_projects, existed_stats_map, connection_stats_map)
+
+    def _build_project_connection_stats(self, project_uuids):
         if not project_uuids:
             return {}
         try:
@@ -237,42 +242,49 @@ class CountIssuesTimer(Thread):
                     conn_total_records = 0
 
             if conn_type == 'email' and conn_id:
-                proj['connection_issues_count'] += self._get_email_threads_count(project_uuid, conn_id)
+                proj['connection_issues_count'] += self._get_email_threads_count(row.project_uuid, conn_id)
             elif conn_type in ISSUE_CONNECTION_TYPES:
                 proj['connection_issues_count'] += conn_total_records
 
-        init_stats = {}
+        connection_stats = {}
         for project_uuid, proj in projects.items():
-            init_stats[project_uuid] = {
+            connection_stats[project_uuid] = {
                 'org_id': proj['org_id'],
                 'connection_issues_count': int(proj['connection_issues_count']),
-                'ticket_issues_count': int(self._get_tickets_count(project_uuid)),
             }
 
-        return init_stats
+        return connection_stats
 
-    def _upsert_project_issue_stats(self, pending_projects, existed_stats_map, init_stats_map):
-        updated = 0
+    def _upsert_project_issue_stats(self, pending_projects, existed_stats_map, connection_stats_map):
         updated_at = datetime.datetime.now(datetime.UTC)
         project_stats = []
 
-        for project_uuid, delta in pending_projects.items():
+        for project_uuid, pending in pending_projects.items():
             row = existed_stats_map.get(project_uuid)
+            need_connection_recount = int(pending.get('connection_count', 0)) != 0 or row is None
+            need_ticket_recount = int(pending.get('ticket_count', 0)) != 0 or row is None
+
+            if not need_connection_recount and not need_ticket_recount:
+                continue
+                
+            connection_stats = connection_stats_map.get(project_uuid, {})
+            org_id = -1
+
             if row:
                 org_id = row.org_id if row.org_id is not None else -1
-                base_connection_count = int(getattr(row, 'connection_issues_count', 0))
-                base_ticket_count = int(getattr(row, 'ticket_issues_count', 0))
+                connection_count = int(getattr(row, 'connection_issues_count', 0))
+                ticket_count = int(getattr(row, 'ticket_issues_count', 0))
             else:
-                init_stats = init_stats_map.get(project_uuid)
-                if not init_stats:
-                    logger.warning('Skip project %s issue stats update: no base stats found', project_uuid)
-                    continue
-                org_id = init_stats.get('org_id', -1)
-                base_connection_count = int(init_stats.get('connection_issues_count', 0))
-                base_ticket_count = int(init_stats.get('ticket_issues_count', 0))
+                connection_count = 0
+                ticket_count = 0
 
-            connection_count = base_connection_count + int(delta.get('connection_count', 0))
-            ticket_count = base_ticket_count + int(delta.get('ticket_count', 0))
+            if need_connection_recount:
+                org_id = connection_stats.get('org_id', -1)
+                connection_count = int(connection_stats.get('connection_issues_count', 0))
+
+            if need_ticket_recount:
+                ticket_count = int(self._get_tickets_count(project_uuid))
+
             total_count = connection_count + ticket_count
 
             project_stats.append({
@@ -283,7 +295,6 @@ class CountIssuesTimer(Thread):
                 'total_issues_count': total_count,
                 'updated_at': updated_at,
             })
-            updated += 1
 
             if len(project_stats) >= self._upsert_batch_size:
                 try:
@@ -300,4 +311,4 @@ class CountIssuesTimer(Thread):
                 logger.error('Failed to batch upsert issues statistics: %s', e)
                 return
 
-        logger.info('Issues statistics updated for %d/%d projects', updated, len(pending_projects))
+        logger.info('Issues statistics updated for %d projects', len(pending_projects))
