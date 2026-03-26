@@ -131,10 +131,10 @@ class CountIssuesTimer(Thread):
                 time.sleep(RECONNECT_SLEEP)
 
     def _listen_connection_issue_events(self):
-        self._listen_issue_stat_events(CONNECTION_UPDATE_CHANNEL, self._enqueue_connection_project_delta)
+        self._listen_issue_stat_events(CONNECTION_UPDATE_CHANNEL, self._enqueue_connection_project_change)
 
     def _listen_ticket_issue_events(self):
-        self._listen_issue_stat_events(TICKET_UPDATE_CHANNEL, self._enqueue_ticket_project_delta)
+        self._listen_issue_stat_events(TICKET_UPDATE_CHANNEL, self._enqueue_ticket_project_change)
 
 
     def cancel(self):
@@ -151,7 +151,7 @@ class CountIssuesTimer(Thread):
                 return
             self._pending_projects[normalized_uuid][pending_key] = True
 
-    def _enqueue_connection_project_delta(self, payload):
+    def _enqueue_connection_project_change(self, payload):
         project_uuid = payload.get('project_uuid')
         connection_type = payload.get('type')
 
@@ -171,7 +171,7 @@ class CountIssuesTimer(Thread):
 
         self._mark_project_pending(project_uuid, 'connection_changed')
 
-    def _enqueue_ticket_project_delta(self, payload):
+    def _enqueue_ticket_project_change(self, payload):
         project_uuid = payload.get('project_uuid')
         if not project_uuid:
             return
