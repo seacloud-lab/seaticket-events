@@ -3,7 +3,6 @@ import datetime
 import json
 import time
 from collections import defaultdict
-from copy import deepcopy
 from threading import Thread, Event, Lock
 
 from seaqa_events.app.event_redis import RedisClient
@@ -71,12 +70,15 @@ class CountIssuesTimer(Thread):
         self.seaqa_db = SeaqaDB(self._db_session_class)
         self.seadb_api = SeaDBAPI(username='seaqa-events')
         self._upsert_batch_size = 50
-        self._pending_projects = defaultdict(lambda: {
+        self._pending_projects = self._new_pending_projects()
+        self._pending_lock = Lock()
+        self.finished = Event()
+
+    def _new_pending_projects(self):
+        return defaultdict(lambda: {
             'connection_count': 0,
             'ticket_count': 0,
         })
-        self._pending_lock = Lock()
-        self.finished = Event()
 
     def run(self):
         Thread(target=self._listen_connection_issue_events, daemon=True).start()
@@ -206,8 +208,8 @@ class CountIssuesTimer(Thread):
 
     def _count_event_projects(self):
         with self._pending_lock:
-            pending_projects = deepcopy(self._pending_projects)
-            self._pending_projects.clear()
+            pending_projects = self._pending_projects
+            self._pending_projects = self._new_pending_projects()
 
         if not pending_projects:
             logger.info('No projects need issues statistics update')
