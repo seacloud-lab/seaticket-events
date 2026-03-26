@@ -76,8 +76,8 @@ class CountIssuesTimer(Thread):
 
     def _new_pending_projects(self):
         return defaultdict(lambda: {
-            'connection_count': 0,
-            'ticket_count': 0,
+            'connection_changed': False,
+            'ticket_changed': False,
         })
 
     def run(self):
@@ -140,6 +140,17 @@ class CountIssuesTimer(Thread):
     def cancel(self):
         self.finished.set()
 
+    def _mark_project_pending(self, project_uuid, pending_key):
+        normalized_uuid = uuid_str_to_32_chars(project_uuid)
+        existing = self._pending_projects.get(normalized_uuid)
+        if existing and existing.get(pending_key):
+            return
+
+        with self._pending_lock:
+            if self._pending_projects[normalized_uuid][pending_key]:
+                return
+            self._pending_projects[normalized_uuid][pending_key] = True
+
     def _enqueue_connection_project_delta(self, payload):
         project_uuid = payload.get('project_uuid')
         connection_type = payload.get('type')
@@ -150,17 +161,15 @@ class CountIssuesTimer(Thread):
             return
 
         try:
-            add_count = int(payload.get('added', 0) or 0)
-            delete_count = int(payload.get('deleted', 0) or 0)
+            added_count = int(payload.get('added', 0) or 0)
+            deleted_count = int(payload.get('deleted', 0) or 0)
         except Exception:
             return
 
-        if add_count == 0 and delete_count == 0:
+        if added_count == 0 and deleted_count == 0:
             return
 
-        with self._pending_lock:
-            project_pending = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
-            project_pending['connection_count'] += (add_count - delete_count)
+        self._mark_project_pending(project_uuid, 'connection_changed')
 
     def _enqueue_ticket_project_delta(self, payload):
         project_uuid = payload.get('project_uuid')
@@ -168,17 +177,15 @@ class CountIssuesTimer(Thread):
             return
 
         try:
-            add_count = int(payload.get('added', 0) or 0)
-            delete_count = int(payload.get('deleted', 0) or 0)
+            added_count = int(payload.get('added', 0) or 0)
+            deleted_count = int(payload.get('deleted', 0) or 0)
         except Exception:
             return
 
-        if add_count == 0 and delete_count == 0:
+        if added_count == 0 and deleted_count == 0:
             return
 
-        with self._pending_lock:
-            project_pending = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
-            project_pending['ticket_count'] += (add_count - delete_count)
+        self._mark_project_pending(project_uuid, 'ticket_changed')
 
     def _get_tickets_count(self, project_uuid):
         sql = "SELECT COUNT(*) as count FROM `tickets` WHERE (`deleted` = False OR `deleted` IS NULL)"
@@ -229,7 +236,7 @@ class CountIssuesTimer(Thread):
         projects_need_connection_recount = []
         for project_uuid, pending in pending_projects.items():
             row = existed_stats_map.get(project_uuid)
-            if int(pending.get('connection_count', 0)) != 0 or row is None:
+            if pending.get('connection_changed') or row is None:
                 projects_need_connection_recount.append(project_uuid)
 
         connection_stats_map = self._build_project_connection_stats(projects_need_connection_recount)
@@ -285,25 +292,24 @@ class CountIssuesTimer(Thread):
 
         for project_uuid, pending in pending_projects.items():
             row = existed_stats_map.get(project_uuid)
-            need_connection_recount = int(pending.get('connection_count', 0)) != 0 or row is None
-            need_ticket_recount = int(pending.get('ticket_count', 0)) != 0 or row is None
+            need_connection_recount = pending.get('connection_changed') or row is None
+            need_ticket_recount = pending.get('ticket_changed') or row is None
 
             if not need_connection_recount and not need_ticket_recount:
                 continue
-                
-            connection_stats = connection_stats_map.get(project_uuid, {})
-            org_id = -1
 
+            connection_stats = connection_stats_map.get(project_uuid, {})
             if row:
                 org_id = row.org_id if row.org_id is not None else -1
                 connection_count = int(getattr(row, 'connection_issues_count', 0))
                 ticket_count = int(getattr(row, 'ticket_issues_count', 0))
             else:
+                org_id = -1
                 connection_count = 0
                 ticket_count = 0
 
             if need_connection_recount:
-                org_id = connection_stats.get('org_id', -1)
+                org_id = connection_stats.get('org_id', org_id)
                 connection_count = int(connection_stats.get('connection_issues_count', 0))
 
             if need_ticket_recount:
