@@ -21,7 +21,8 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-ISSUE_COUNTER_CHANNEL = 'connection_update'
+CONNECTION_UPDATE_CHANNEL = 'connection_update'
+TICKET_UPDATE_CHANNEL = 'ticket_update'
 # 1 day in seconds, if no message received for this duration, trigger redis reconnection logic
 NO_MSG_TIMEOUT = 60 * 60 * 24 
 # Redis reconnection sleep time: 1 second to avoid frequent reconnection attempts
@@ -78,21 +79,22 @@ class CountIssuesTimer(Thread):
         self.finished = Event()
 
     def run(self):
-        Thread(target=self._listen_issue_stat_events, daemon=True).start()
+        Thread(target=self._listen_connection_issue_events, daemon=True).start()
+        Thread(target=self._listen_ticket_issue_events, daemon=True).start()
         while not self.finished.is_set():
             self.finished.wait(self._interval)
             self._count_event_projects()
 
-    def _listen_issue_stat_events(self):
+    def _listen_issue_stat_events(self, channel_name, enqueue_func):
         subscriber = None
         message_check_time = 0
         while not self.finished.is_set():
             if subscriber is None:
                 try:
-                    subscriber = self._redis_client.get_subscriber(ISSUE_COUNTER_CHANNEL)
+                    subscriber = self._redis_client.get_subscriber(channel_name)
                     message_check_time = time.time()
                 except Exception as e:
-                    logger.warning('Failed to subscribe %s event channel: %s', ISSUE_COUNTER_CHANNEL, e)
+                    logger.warning('Failed to subscribe %s event channel: %s', channel_name, e)
                     time.sleep(RECONNECT_SLEEP)
                     continue
 
@@ -108,17 +110,17 @@ class CountIssuesTimer(Thread):
 
                 message_check_time = time.time()
                 payload = json.loads(message.get('data') or '{}')
-                self._enqueue_project_delta(payload)
+                enqueue_func(payload)
 
             except NoMessageException as e:
-                logger.warning('Failed to handle %s event: %s', ISSUE_COUNTER_CHANNEL, e)
+                logger.warning('Failed to handle %s event: %s', channel_name, e)
                 try:
                     subscriber.close()
                 except Exception:
                     pass
                 subscriber = None
             except Exception as e:
-                logger.warning('Failed to handle %s event: %s', ISSUE_COUNTER_CHANNEL, e)
+                logger.warning('Failed to handle %s event: %s', channel_name, e)
                 try:
                     subscriber.close()
                 except Exception:
@@ -126,22 +128,28 @@ class CountIssuesTimer(Thread):
                 subscriber = None
                 time.sleep(RECONNECT_SLEEP)
 
+    def _listen_connection_issue_events(self):
+        self._listen_issue_stat_events(CONNECTION_UPDATE_CHANNEL, self._enqueue_connection_project_delta)
+
+    def _listen_ticket_issue_events(self):
+        self._listen_issue_stat_events(TICKET_UPDATE_CHANNEL, self._enqueue_ticket_project_delta)
+
 
     def cancel(self):
         self.finished.set()
 
-    def _enqueue_project_delta(self, payload):
+    def _enqueue_connection_project_delta(self, payload):
         project_uuid = payload.get('project_uuid')
-        issue_type = payload.get('type')
+        connection_type = payload.get('type')
 
         if not project_uuid:
             return
-        if issue_type not in ISSUE_CONNECTION_TYPES and issue_type != 'ticket':
+        if connection_type not in ISSUE_CONNECTION_TYPES:
             return
 
         try:
-            add_count = int(payload.get('add', 0))
-            delete_count = int(payload.get('delete', 0))
+            add_count = int(payload.get('added', 0) or 0)
+            delete_count = int(payload.get('deleted', 0) or 0)
         except Exception:
             return
 
@@ -150,11 +158,25 @@ class CountIssuesTimer(Thread):
 
         with self._pending_lock:
             project_pending = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
-            delta = add_count - delete_count
-            if issue_type == 'ticket':
-                project_pending['ticket_count'] += delta
-            else:
-                project_pending['connection_count'] += delta
+            project_pending['connection_count'] += (add_count - delete_count)
+
+    def _enqueue_ticket_project_delta(self, payload):
+        project_uuid = payload.get('project_uuid')
+        if not project_uuid:
+            return
+
+        try:
+            add_count = int(payload.get('added', 0) or 0)
+            delete_count = int(payload.get('deleted', 0) or 0)
+        except Exception:
+            return
+
+        if add_count == 0 and delete_count == 0:
+            return
+
+        with self._pending_lock:
+            project_pending = self._pending_projects[uuid_str_to_32_chars(project_uuid)]
+            project_pending['ticket_count'] += (add_count - delete_count)
 
     def _get_tickets_count(self, project_uuid):
         sql = "SELECT COUNT(*) as count FROM `tickets` WHERE (`deleted` = False OR `deleted` IS NULL)"
