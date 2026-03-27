@@ -4,6 +4,7 @@ import time
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
+from seaqa_events.tasks.issues_counter import IssuesCounter
 
 
 class App(object):
@@ -17,6 +18,9 @@ class App(object):
         # notification cleaner
         self.notification_cleaner = NotificationCleaner(configs)
 
+        # project issues counter
+        self.issues_counter = IssuesCounter(configs)
+
     def serve_forever(self):
         # ai stats worker
         self.ai_stats_worker.start()
@@ -24,6 +28,8 @@ class App(object):
         self.email_notices_sender.start()
 
         self.notification_cleaner.start()
+
+        self.issues_counter.start()
 
         # Keep main thread alive
         try:
