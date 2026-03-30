@@ -5,6 +5,7 @@ from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
 from seaqa_events.tasks.issues_counter import IssuesCounter
+from seaqa_events.tasks.linking_processor import LinkingProcessor
 
 
 class App(object):
@@ -21,6 +22,9 @@ class App(object):
         # project issues counter
         self.issues_counter = IssuesCounter(configs)
 
+        # linking processor: records activity logs on tickets linked to data events
+        self.linking_processor = LinkingProcessor(configs)
+
     def serve_forever(self):
         # ai stats worker
         self.ai_stats_worker.start()
@@ -30,6 +34,8 @@ class App(object):
         self.notification_cleaner.start()
 
         self.issues_counter.start()
+
+        self.linking_processor.start()
 
         # Keep main thread alive
         try:
