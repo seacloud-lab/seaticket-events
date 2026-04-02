@@ -100,8 +100,7 @@ class CleanProjectConnectionsTimer(Thread):
             session.execute(text("""DELETE FROM portal_external_invitations WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
             # delete project issues statistics
             session.execute(text("""DELETE FROM project_issues_statistics WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            # delete project connection
-            session.execute(text("""DELETE FROM project_connection WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
+
             session.execute(text("""INSERT IGNORE INTO deleted_projects (project_uuid) VALUES (:project_uuid)"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM projects WHERE uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.commit()
@@ -158,6 +157,10 @@ class CleanProjectConnectionsTimer(Thread):
     def _delete_deleted_project(self, project_uuid):
         with self._db_session_class() as session:
             sql = """DELETE FROM deleted_projects WHERE project_uuid=:project_uuid"""
+            session.execute(text(sql), {'project_uuid': project_uuid})
+            session.commit()
+        with self._db_session_class() as session:
+            sql = """DELETE FROM project_connection WHERE project_uuid=:project_uuid"""
             session.execute(text(sql), {'project_uuid': project_uuid})
             session.commit()
 
