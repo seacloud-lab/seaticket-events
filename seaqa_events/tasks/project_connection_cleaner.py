@@ -83,24 +83,7 @@ class CleanProjectConnectionsTimer(Thread):
             return session.execute(text(sql), {'expiry_time': expiry_time}).fetchall()
 
     def _move_trash_project_to_deleted(self, project_uuid):
-        project_uuid_36 = uuid_str_to_36_chars(project_uuid)
         with self._db_session_class() as session:
-            # delete project views
-            session.execute(text("""DELETE FROM connection_views WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
-            session.execute(text("""DELETE FROM ticket_views WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
-            session.execute(text("""DELETE FROM knowledge_base_views WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
-            session.execute(text("""DELETE FROM project_notification WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            # delete chat sessions and messages
-            session.execute(text("""DELETE FROM chat_messages WHERE session_uuid IN (SELECT session_uuid FROM chat_sessions WHERE project_uuid=:project_uuid)"""), {'project_uuid': project_uuid_36})
-            session.execute(text("""DELETE FROM chat_message_thought_process WHERE session_uuid IN (SELECT session_uuid FROM chat_sessions WHERE project_uuid=:project_uuid)"""), {'project_uuid': project_uuid_36})
-            session.execute(text("""DELETE FROM chat_sessions WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            # delete portal chat sessions and messages
-            session.execute(text("""DELETE FROM portal_chat_messages WHERE session_uuid IN (SELECT session_uuid FROM portal_chat_sessions WHERE project_uuid=:project_uuid)"""), {'project_uuid': project_uuid_36})
-            session.execute(text("""DELETE FROM portal_chat_sessions WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            session.execute(text("""DELETE FROM portal_external_invitations WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            # delete project issues statistics
-            session.execute(text("""DELETE FROM project_issues_statistics WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-
             session.execute(text("""INSERT IGNORE INTO deleted_projects (project_uuid) VALUES (:project_uuid)"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM projects WHERE uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.commit()
