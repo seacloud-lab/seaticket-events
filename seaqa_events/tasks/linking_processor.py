@@ -69,8 +69,6 @@ class LinkingWorker(Thread):
     def cancel(self):
         self.finished.set()
 
-    # ── Redis listener ──────────────────────────────────────────────
-
     def _listen_data_events(self):
         subscriber = None
         last_message_time = time.time()
@@ -127,7 +125,6 @@ class LinkingWorker(Thread):
     def _handle_event(self, data):
         if not isinstance(data, dict):
             return
-        print(data, '----data')
         source_type = data.get('source_type')
         event = data.get('event')
         if not isinstance(event, dict):
@@ -187,29 +184,13 @@ class LinkingWorker(Thread):
             'issue_url': row_data.get('url', ''),
         }
         now = datetime.datetime.now(datetime.UTC).isoformat()
-        rows = self._build_activity_rows(
-            linked_ticket, event_type, old_all, new_all, base_detail, now
-        )
+        rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
         if not rows:
-            logger.debug(
-                'LinkingProcessor: no activity rows to insert for "%s" ticket=%s.',
-                event_type, linked_ticket,
-            )
             return
         self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
-        logger.info(
-            'LinkingProcessor: inserted %d activity row(s) for "%s" on ticket %s '
-            '(project=%s, record_id=%s, issue_number=%s)',
-            len(rows), event_type, linked_ticket, project_uuid,
-            record_id, row_data.get('issue_number'),
-        )
+        logger.info('inserted %d activity rows for "%s" on ticket %s', len(rows), event_type, linked_ticket)
 
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
-        """Return a list of activity row dicts ready for insert_rows.
-
-        For github_issue_updated: one row per changed field (mirrors record_ticket_activities).
-        For all other event types: a single row.
-        """
         def _make_row(old_value, new_value):
             return {
                 'ticket_id': linked_ticket,
@@ -224,35 +205,40 @@ class LinkingWorker(Thread):
                 'created_time': now,
             }
 
-        if event_type != 'github_issue_updated':
-            return [_make_row(old_all, new_all)]
+        if event_type in ('github_issue_closed', 'github_issue_reopened'):
+            # state + state_reason combined in one record;
+            # all other changed display fields get individual rows.
+            old_obj = old_all or {}
+            new_obj = new_all or {}
+            state_fields = {'state', 'state_reason'}
+            rows = []
+            old_state = {k: v for k, v in old_obj.items() if k in state_fields}
+            new_state = {k: v for k, v in new_obj.items() if k in state_fields}
+            if old_state or new_state:
+                rows.append(_make_row(old_state or None, new_state or None))
+            for field in sorted((set(old_obj) | set(new_obj)) - state_fields):
+                rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
+            return rows
 
-        # github_issue_updated: one row per changed field
-        old_obj = old_all or {}
-        new_obj = new_all or {}
-        all_fields = sorted(set(old_obj) | set(new_obj))
-        rows = []
-        for field in all_fields:
-            old_val = old_obj.get(field)
-            new_val = new_obj.get(field)
-            rows.append(_make_row({field: old_val}, {field: new_val}))
-        return rows
+        if event_type == 'github_issue_updated':
+            # one row per changed field
+            old_obj = old_all or {}
+            new_obj = new_all or {}
+            rows = []
+            for field in sorted(set(old_obj) | set(new_obj)):
+                rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
+            return rows
+
+        return [_make_row(old_all, new_all)]
 
     def _extract_display_values(self, event_type, event):
         old_raw = event.get('old_value') or {}
         new_raw = event.get('new_value') or {}
 
-        if event_type in ('github_issue_closed', 'github_issue_reopened'):
-            closed_fields = {'state', 'state_reason'}
-            old_display = {k: v for k, v in old_raw.items() if k in closed_fields and v is not None}
-            new_display = {k: v for k, v in new_raw.items() if k in closed_fields and v is not None}
-            return old_display or None, new_display or None
-
         if event_type == 'github_issue_comment_added':
             comments = new_raw.get('comments') or []
             return None, len(comments)
 
-        # github_issue_updated / github_issue_added
         old_display = (
             {k: v for k, v in old_raw.items() if k in GITHUB_ISSUE_DISPLAY_FIELDS and v is not None}
             if old_raw else None
