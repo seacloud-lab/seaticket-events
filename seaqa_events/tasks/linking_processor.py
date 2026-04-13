@@ -22,6 +22,9 @@ RECONNECT_SLEEP = 1
 # Fields from a GitHub issue row worth surfacing in the activity log
 GITHUB_ISSUE_DISPLAY_FIELDS = ['title', 'state', 'labels', 'assignees', 'issue_type', 'state_reason']
 
+# Fields from a Discourse topic row worth surfacing in the activity log
+DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
+
 
 
 class LinkingProcessor:
@@ -29,6 +32,7 @@ class LinkingProcessor:
 
     Currently handles:
     - GitHub issue changes → find the linked ticket → insert a ticket activity log.
+    - Discourse topic changes → find the linked ticket → insert a ticket activity log.
     """
 
     def __init__(self, configs):
@@ -142,10 +146,18 @@ class LinkingWorker(Thread):
             if connection_id is None:
                 return
             try:
-                # Find the ticket linked to this GitHub issue and insert an activity log.
                 self._handle_github_issue_event(project_uuid, record_id, connection_id, event)
             except Exception as e:
                 logger.error('failed to handle github_issue event (project=%s record=%s): %s', project_uuid, record_id, e)
+
+        elif source_type == ConnectionType.DISCOURSE_FORUM.value:
+            connection_id = data.get('connection_id')
+            if connection_id is None:
+                return
+            try:
+                self._handle_discourse_topic_event(project_uuid, record_id, connection_id, event)
+            except Exception as e:
+                logger.error('failed to handle discourse_topic event (project=%s record=%s): %s', project_uuid, record_id, e)
 
     def _handle_github_issue_event(self, project_uuid, record_id, connection_id, event):
         try:
@@ -189,6 +201,49 @@ class LinkingWorker(Thread):
             return
         self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
         logger.info('inserted %d activity rows for ticket %s', len(rows), linked_ticket)
+
+    def _handle_discourse_topic_event(self, project_uuid, record_id, connection_id, event):
+        try:
+            record_id = int(record_id)
+        except (ValueError, TypeError):
+            logger.warning('invalid record_id %r for project=%s, skipping.', record_id, project_uuid)
+            return
+
+        topics_table = f'{ConnectionType.DISCOURSE_FORUM.value}_{connection_id}'
+        sql = (
+            f"SELECT `linked_ticket`, `topic_id`, `title`, `slug` "
+            f"FROM `{topics_table}` WHERE `_pk` = {record_id} LIMIT 1"
+        )
+        results = self.seadb_api.query_rows(project_uuid, sql).get('results', [])
+        if not results:
+            logger.warning('record not found for record_id=%s in %s', record_id, topics_table)
+            return
+
+        row_data = results[0]
+        linked_ticket = row_data.get('linked_ticket')
+        if not linked_ticket:
+            return
+        try:
+            linked_ticket = int(linked_ticket)
+        except (ValueError, TypeError):
+            logger.warning('invalid linked_ticket %r for record_id=%s, skipping.', linked_ticket, record_id)
+            return
+
+        event_type = event.get('type', '')
+        old_all, new_all = self._extract_display_values(event_type, event)
+        base_detail = {
+            'connection_id': connection_id,
+            'record_id': record_id,
+            'topic_id': row_data.get('topic_id'),
+            'topic_title': row_data.get('title', ''),
+            'slug': row_data.get('slug', ''),
+        }
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
+        if not rows:
+            return
+        self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
+        logger.info('inserted %d activity rows for "%s" on ticket %s', len(rows), event_type, linked_ticket)
 
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
         def _make_row(old_value, new_value):
@@ -234,7 +289,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row(old_state or None, new_state or None))
             return rows
 
-        if event_type == 'github_issue_updated':
+        if event_type in ('github_issue_updated', 'discourse_topic_updated'):
             # one row per changed field
             old_obj = old_all or {}
             new_obj = new_all or {}
@@ -253,12 +308,23 @@ class LinkingWorker(Thread):
             comments = new_raw.get('comments') or []
             return None, len(comments)
 
+        if event_type == 'discourse_topic_reply_added':
+            replies = new_raw.get('replies') or []
+            return None, len(replies)
+
+        if event_type.startswith('github_issue_'):
+            display_fields = GITHUB_ISSUE_DISPLAY_FIELDS
+        elif event_type.startswith('discourse_topic_'):
+            display_fields = DISCOURSE_TOPIC_DISPLAY_FIELDS
+        else:
+            return None, None
+
         old_display = (
-            {k: v for k, v in old_raw.items() if k in GITHUB_ISSUE_DISPLAY_FIELDS and v is not None}
+            {k: v for k, v in old_raw.items() if k in display_fields and v is not None}
             if old_raw else None
         )
         new_display = (
-            {k: v for k, v in new_raw.items() if k in GITHUB_ISSUE_DISPLAY_FIELDS and v is not None}
+            {k: v for k, v in new_raw.items() if k in display_fields and v is not None}
             if new_raw else None
         )
         return old_display or None, new_display or None
