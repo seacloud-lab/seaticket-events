@@ -206,18 +206,32 @@ class LinkingWorker(Thread):
             }
 
         if event_type in ('github_issue_closed', 'github_issue_reopened'):
-            # state + state_reason combined in one record;
-            # all other changed display fields get individual rows.
+            # state/state_reason use original event_type; other fields use github_issue_updated.
             old_obj = old_all or {}
             new_obj = new_all or {}
             state_fields = {'state', 'state_reason'}
             rows = []
+            # Other fields use github_issue_updated type
+            other_fields = (set(old_obj) | set(new_obj)) - state_fields
+            for field in sorted(other_fields):
+                field_event_type = 'github_issue_updated'
+                rows.append({
+                    'ticket_id': linked_ticket,
+                    'activity_type': field_event_type,
+                    'detail': json.dumps({
+                        **base_detail,
+                        'field_name': field,
+                        'old_value': {field: old_obj.get(field)},
+                        'new_value': {field: new_obj.get(field)},
+                    }),
+                    'creator': 'system',
+                    'created_time': now,
+                })
+            # State fields use original event_type (github_issue_closed/reopened)
             old_state = {k: v for k, v in old_obj.items() if k in state_fields}
             new_state = {k: v for k, v in new_obj.items() if k in state_fields}
             if old_state or new_state:
                 rows.append(_make_row(old_state or None, new_state or None))
-            for field in sorted((set(old_obj) | set(new_obj)) - state_fields):
-                rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
         if event_type == 'github_issue_updated':
