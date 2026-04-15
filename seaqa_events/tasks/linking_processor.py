@@ -188,7 +188,7 @@ class LinkingWorker(Thread):
         if not rows:
             return
         self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
-        logger.info('inserted %d activity rows for "%s" on ticket %s', len(rows), event_type, linked_ticket)
+        logger.info('inserted %d activity rows for ticket %s', len(rows), linked_ticket)
 
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
         def _make_row(old_value, new_value):
