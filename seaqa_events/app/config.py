@@ -79,7 +79,7 @@ def get_llm_price(models):
     for model in models:
         if not isinstance(model, dict) or model.get('disable', False):
             continue
-        if model.get('type') in ('proxy', 'other', 'hosted_vllm'):
+        if model.get('type') in ('other', 'hosted_vllm'):
             required_fields = ('model', 'url', 'price')
         else:
             required_fields = ('model', 'key', 'price')
