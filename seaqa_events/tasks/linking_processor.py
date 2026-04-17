@@ -5,7 +5,9 @@ import time
 from threading import Thread, Event
 
 from seaqa_events.app.event_redis import RedisClient
+from seaqa_events.db import init_db_session_class
 from seaqa_events.utils.seadb_api import SeaDBAPI
+from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.constant import ConnectionType
 from seaqa_events.utils import uuid_str_to_32_chars
 
@@ -65,6 +67,8 @@ class LinkingWorker(Thread):
         super().__init__(name='linking_processor_worker')
         self._redis_client = RedisClient(configs, socket_timeout=10)
         self.seadb_api = SeaDBAPI(username='seaqa-events')
+        db_session_class = init_db_session_class(configs)
+        self.seaqa_db = SeaqaDB(db_session_class)
         self.finished = Event()
 
     def run(self):
@@ -231,12 +235,28 @@ class LinkingWorker(Thread):
 
         event_type = event.get('type', '')
         old_all, new_all = self._extract_display_values(event_type, event)
+
+        # Build topic_url from connection config
+        topic_url = ''
+        try:
+            connection = self.seaqa_db.get_project_connection_by_id(connection_id)
+            if connection:
+                config = json.loads(connection.config) if connection.config else {}
+                forum_url = config.get('url', '')
+                slug = row_data.get('slug', '')
+                topic_id = row_data.get('topic_id', '')
+                if forum_url and slug and topic_id:
+                    topic_url = forum_url.rstrip('/') + '/t/' + slug + '/' + str(topic_id)
+        except Exception as e:
+            logger.warning('failed to build topic_url for connection_id=%s: %s', connection_id, e)
+
         base_detail = {
             'connection_id': connection_id,
             'record_id': record_id,
             'topic_id': row_data.get('topic_id'),
             'topic_title': row_data.get('title', ''),
             'slug': row_data.get('slug', ''),
+            'topic_url': topic_url,
         }
         now = datetime.datetime.now(datetime.UTC).isoformat()
         rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
@@ -260,6 +280,7 @@ class LinkingWorker(Thread):
                 'created_time': now,
             }
 
+        # only github has closed/reopened status changes, need special handling
         if event_type in ('github_issue_closed', 'github_issue_reopened'):
             # state/state_reason use original event_type; other fields use github_issue_updated.
             old_obj = old_all or {}
@@ -298,16 +319,19 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
+        # reply_added events
         return [_make_row(old_all, new_all)]
 
     def _extract_display_values(self, event_type, event):
         old_raw = event.get('old_value') or {}
         new_raw = event.get('new_value') or {}
 
+        # github
         if event_type == 'github_issue_comment_added':
             comments = new_raw.get('comments') or []
             return None, len(comments)
 
+        # discourse
         if event_type == 'discourse_topic_reply_added':
             replies = new_raw.get('replies') or []
             return None, len(replies)
