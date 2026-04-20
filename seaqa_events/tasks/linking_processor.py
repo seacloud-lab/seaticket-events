@@ -5,7 +5,9 @@ import time
 from threading import Thread, Event
 
 from seaqa_events.app.event_redis import RedisClient
+from seaqa_events.db import init_db_session_class
 from seaqa_events.utils.seadb_api import SeaDBAPI
+from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.constant import ConnectionType
 from seaqa_events.utils import uuid_str_to_32_chars
 
@@ -22,6 +24,9 @@ RECONNECT_SLEEP = 1
 # Fields from a GitHub issue row worth surfacing in the activity log
 GITHUB_ISSUE_DISPLAY_FIELDS = ['title', 'state', 'labels', 'assignees', 'issue_type', 'state_reason']
 
+# Fields from a Discourse topic row worth surfacing in the activity log
+DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
+
 
 
 class LinkingProcessor:
@@ -29,6 +34,7 @@ class LinkingProcessor:
 
     Currently handles:
     - GitHub issue changes → find the linked ticket → insert a ticket activity log.
+    - Discourse topic changes → find the linked ticket → insert a ticket activity log.
     """
 
     def __init__(self, configs):
@@ -61,6 +67,8 @@ class LinkingWorker(Thread):
         super().__init__(name='linking_processor_worker')
         self._redis_client = RedisClient(configs, socket_timeout=10)
         self.seadb_api = SeaDBAPI(username='seaqa-events')
+        db_session_class = init_db_session_class(configs)
+        self.seaqa_db = SeaqaDB(db_session_class)
         self.finished = Event()
 
     def run(self):
@@ -142,40 +150,65 @@ class LinkingWorker(Thread):
             if connection_id is None:
                 return
             try:
-                # Find the ticket linked to this GitHub issue and insert an activity log.
                 self._handle_github_issue_event(project_uuid, record_id, connection_id, event)
             except Exception as e:
                 logger.error('failed to handle github_issue event (project=%s record=%s): %s', project_uuid, record_id, e)
 
-    def _handle_github_issue_event(self, project_uuid, record_id, connection_id, event):
+        elif source_type == ConnectionType.DISCOURSE_FORUM.value:
+            connection_id = data.get('connection_id')
+            if connection_id is None:
+                return
+            try:
+                self._handle_discourse_topic_event(project_uuid, record_id, connection_id, event)
+            except Exception as e:
+                logger.error('failed to handle discourse_topic event (project=%s record=%s): %s', project_uuid, record_id, e)
+
+    def _load_linked_record_event_context(self, project_uuid, record_id, table_name, select_fields, event):
         try:
             record_id = int(record_id)
         except (ValueError, TypeError):
-            logger.warning('invalid record_id %r for project=%s, skipping.',record_id, project_uuid)
-            return
+            logger.warning('invalid record_id %r for project=%s, skipping.', record_id, project_uuid)
+            return None
 
-        issues_table = f'{ConnectionType.GITHUB_ISSUE.value}_{connection_id}'
         sql = (
-            f"SELECT `linked_ticket`, `issue_number`, `title`, `url` "
-            f"FROM `{issues_table}` WHERE `_pk` = {record_id} LIMIT 1"
+            f"SELECT {select_fields} "
+            f"FROM `{table_name}` WHERE `_pk` = {record_id} LIMIT 1"
         )
         results = self.seadb_api.query_rows(project_uuid, sql).get('results', [])
         if not results:
-            logger.warning('record not found for record_id=%s in %s', record_id, issues_table)
-            return
+            logger.warning('record not found for record_id=%s in %s', record_id, table_name)
+            return None
 
         row_data = results[0]
         linked_ticket = row_data.get('linked_ticket')
         if not linked_ticket:
-            return
+            return None
         try:
             linked_ticket = int(linked_ticket)
         except (ValueError, TypeError):
-            logger.warning('invalid linked_ticket %r for record_id=%s, skipping.',linked_ticket, record_id)
-            return
+            logger.warning('invalid linked_ticket %r for record_id=%s, skipping.', linked_ticket, record_id)
+            return None
 
         event_type = event.get('type', '')
         old_all, new_all = self._extract_display_values(event_type, event)
+        return record_id, row_data, linked_ticket, event_type, old_all, new_all
+
+    def _insert_ticket_activity_rows(self, project_uuid, linked_ticket, event_type, old_all, new_all, base_detail):
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
+        if not rows:
+            return 0
+        self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
+        return len(rows)
+
+    def _handle_github_issue_event(self, project_uuid, record_id, connection_id, event):
+        issues_table = f'{ConnectionType.GITHUB_ISSUE.value}_{connection_id}'
+        select_fields = '`linked_ticket`, `issue_number`, `title`, `url`'
+        context = self._load_linked_record_event_context(project_uuid, record_id, issues_table, select_fields, event)
+        if not context:
+            return
+
+        record_id, row_data, linked_ticket, event_type, old_all, new_all = context
         base_detail = {
             'connection_id': connection_id,
             'record_id': record_id,
@@ -183,12 +216,49 @@ class LinkingWorker(Thread):
             'issue_title': row_data.get('title', ''),
             'issue_url': row_data.get('url', ''),
         }
-        now = datetime.datetime.now(datetime.UTC).isoformat()
-        rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
-        if not rows:
+        inserted = self._insert_ticket_activity_rows(
+            project_uuid, linked_ticket, event_type, old_all, new_all, base_detail
+        )
+        if not inserted:
             return
-        self.seadb_api.insert_rows(project_uuid, TICKET_ACTIVITIES_TABLE, rows)
-        logger.info('inserted %d activity rows for ticket %s', len(rows), linked_ticket)
+        logger.info('inserted %d activity rows for ticket %s', inserted, linked_ticket)
+
+    def _handle_discourse_topic_event(self, project_uuid, record_id, connection_id, event):
+        topics_table = f'{ConnectionType.DISCOURSE_FORUM.value}_{connection_id}'
+        select_fields = '`linked_ticket`, `topic_id`, `title`, `slug`'
+        context = self._load_linked_record_event_context(project_uuid, record_id, topics_table, select_fields, event)
+        if not context:
+            return
+        record_id, row_data, linked_ticket, event_type, old_all, new_all = context
+
+        # Build topic_url from connection config
+        topic_url = ''
+        try:
+            connection = self.seaqa_db.get_project_connection_by_id(connection_id)
+            if connection:
+                config = json.loads(connection.config) if connection.config else {}
+                forum_url = config.get('url', '')
+                slug = row_data.get('slug', '')
+                topic_id = row_data.get('topic_id', '')
+                if forum_url and slug and topic_id:
+                    topic_url = forum_url.rstrip('/') + '/t/' + slug + '/' + str(topic_id)
+        except Exception as e:
+            logger.warning('failed to build topic_url for connection_id=%s: %s', connection_id, e)
+
+        base_detail = {
+            'connection_id': connection_id,
+            'record_id': record_id,
+            'topic_id': row_data.get('topic_id'),
+            'topic_title': row_data.get('title', ''),
+            'slug': row_data.get('slug', ''),
+            'topic_url': topic_url,
+        }
+        inserted = self._insert_ticket_activity_rows(
+            project_uuid, linked_ticket, event_type, old_all, new_all, base_detail
+        )
+        if not inserted:
+            return
+        logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
 
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
         def _make_row(old_value, new_value):
@@ -205,6 +275,7 @@ class LinkingWorker(Thread):
                 'created_time': now,
             }
 
+        # only github has closed/reopened status changes, need special handling
         if event_type in ('github_issue_closed', 'github_issue_reopened'):
             # state/state_reason use original event_type; other fields use github_issue_updated.
             old_obj = old_all or {}
@@ -234,7 +305,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row(old_state or None, new_state or None))
             return rows
 
-        if event_type == 'github_issue_updated':
+        if event_type in ('github_issue_updated', 'discourse_topic_updated'):
             # one row per changed field
             old_obj = old_all or {}
             new_obj = new_all or {}
@@ -243,22 +314,42 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
+        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added'):
+            count = new_all
+            if isinstance(new_all, dict):
+                count = new_all.get('count')
+            return [_make_row(None, count)]
+
+        # other events
         return [_make_row(old_all, new_all)]
 
     def _extract_display_values(self, event_type, event):
         old_raw = event.get('old_value') or {}
         new_raw = event.get('new_value') or {}
 
+        # github
         if event_type == 'github_issue_comment_added':
             comments = new_raw.get('comments') or []
-            return None, len(comments)
+            return None, {'count': len(comments)}
+
+        # discourse
+        if event_type == 'discourse_topic_reply_added':
+            replies = new_raw.get('replies') or []
+            return None, {'count': len(replies)}
+
+        if event_type.startswith('github_issue_'):
+            display_fields = GITHUB_ISSUE_DISPLAY_FIELDS
+        elif event_type.startswith('discourse_topic_'):
+            display_fields = DISCOURSE_TOPIC_DISPLAY_FIELDS
+        else:
+            return None, None
 
         old_display = (
-            {k: v for k, v in old_raw.items() if k in GITHUB_ISSUE_DISPLAY_FIELDS and v is not None}
+            {k: v for k, v in old_raw.items() if k in display_fields and v is not None}
             if old_raw else None
         )
         new_display = (
-            {k: v for k, v in new_raw.items() if k in GITHUB_ISSUE_DISPLAY_FIELDS and v is not None}
+            {k: v for k, v in new_raw.items() if k in display_fields and v is not None}
             if new_raw else None
         )
         return old_display or None, new_display or None
