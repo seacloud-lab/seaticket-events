@@ -35,6 +35,7 @@ class LinkingProcessor:
     Currently handles:
     - GitHub issue changes → find the linked ticket → insert a ticket activity log.
     - Discourse topic changes → find the linked ticket → insert a ticket activity log.
+    - Email thread changes → find the linked ticket → insert a ticket activity log.
     """
 
     def __init__(self, configs):
@@ -163,6 +164,15 @@ class LinkingWorker(Thread):
             except Exception as e:
                 logger.error('failed to handle discourse_topic event (project=%s record=%s): %s', project_uuid, record_id, e)
 
+        elif source_type == ConnectionType.EMAIL.value:
+            connection_id = data.get('connection_id')
+            if connection_id is None:
+                return
+            try:
+                self._handle_email_thread_event(project_uuid, record_id, connection_id, event)
+            except Exception as e:
+                logger.error('failed to handle email event (project=%s record=%s): %s', project_uuid, record_id, e)
+
     def _load_linked_record_event_context(self, project_uuid, record_id, table_name, select_fields, event):
         try:
             record_id = int(record_id)
@@ -260,6 +270,27 @@ class LinkingWorker(Thread):
             return
         logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
 
+    def _handle_email_thread_event(self, project_uuid, record_id, connection_id, event):
+        threads_table = f'{ConnectionType.EMAIL.value}_thread_{connection_id}'
+        select_fields = '`linked_ticket`, `_pk`, `title`'
+        context = self._load_linked_record_event_context(project_uuid, record_id, threads_table, select_fields, event)
+        if not context:
+            return
+
+        record_id, row_data, linked_ticket, event_type, old_all, new_all = context
+        base_detail = {
+            'connection_id': connection_id,
+            'record_id': record_id,
+            'thread_id': row_data.get('_pk'),
+            'thread_title': row_data.get('title', ''),
+        }
+        inserted = self._insert_ticket_activity_rows(
+            project_uuid, linked_ticket, event_type, old_all, new_all, base_detail
+        )
+        if not inserted:
+            return
+        logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
+
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
         def _make_row(old_value, new_value):
             return {
@@ -314,7 +345,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
-        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added'):
+        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added', 'email_message_added'):
             count = new_all
             if isinstance(new_all, dict):
                 count = new_all.get('count')
@@ -336,6 +367,10 @@ class LinkingWorker(Thread):
         if event_type == 'discourse_topic_reply_added':
             replies = new_raw.get('replies') or []
             return None, {'count': len(replies)}
+
+        # email
+        if event_type == 'email_message_added':
+            return None, {'count': 1}
 
         if event_type.startswith('github_issue_'):
             display_fields = GITHUB_ISSUE_DISPLAY_FIELDS
