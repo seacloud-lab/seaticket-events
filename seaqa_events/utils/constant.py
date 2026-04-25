@@ -14,7 +14,7 @@ class AIScenario(Enum):
     CHAT = 'chat'
     PORTAL_CHAT = 'portal-chat'
     SEARCH = 'search'
-    RECORD_GENERATION = 'record_generation'
+    RECORD_GENERATION = 'record-generation'
     UNKNOWN = 'unknown'
 
     @classmethod
