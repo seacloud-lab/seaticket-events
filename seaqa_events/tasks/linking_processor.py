@@ -345,11 +345,22 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
-        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added', 'email_message_added'):
+        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added'):
             count = new_all
             if isinstance(new_all, dict):
                 count = new_all.get('count')
             return [_make_row(None, count)]
+        elif event_type == 'email_message_added':
+            return [{
+                'ticket_id': linked_ticket,
+                'activity_type': event_type,
+                'detail': json.dumps({
+                    **base_detail,
+                    'field_name': event_type,
+                }),
+                'creator': 'system',
+                'created_time': now,
+            }]
 
         # other events
         return [_make_row(old_all, new_all)]
