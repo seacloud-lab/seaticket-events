@@ -89,13 +89,13 @@ def get_llm_price(models):
             if not isinstance(model['price'], (int, float)):
                 continue
             model['price'] = {
-                'input': model['price'],
-                'output': 0
+                'input_tokens': model['price'],
+                'output_tokens': 0
             }
-        elif 'input' not in model['price']:
+        elif 'input_tokens' not in model['price']:
             continue
-        elif 'output' not in model['price']:
-            model['price']['output'] = 0 # compatible for embedding models
+        elif 'output_tokens' not in model['price']:
+            model['price']['output_tokens'] = 0 # compatible for embedding models
         result[model['model']] = model['price']
     return result
 
