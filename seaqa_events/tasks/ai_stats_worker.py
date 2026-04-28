@@ -179,8 +179,8 @@ class AIStatsWorker:
             for (model, username, scenario), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
-                input_tokens_price = AI_PRICES[model].get('input', 0)
-                output_tokens_price = AI_PRICES[model].get('output', 0)
+                input_tokens_price = AI_PRICES[model].get('input_tokens', 0)
+                output_tokens_price = AI_PRICES[model].get('output_tokens', 0)
                 cost = input_tokens_price * (input_tokens / 1e6) + output_tokens_price * (output_tokens / 1e6)
 
                 logger.debug('project %s model %s username %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
