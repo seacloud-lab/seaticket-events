@@ -8,7 +8,8 @@ from sqlalchemy import text
 from seaqa_events.db import init_db_session_class
 from seaqa_events.utils import uuid_str_to_36_chars
 from seaqa_events.utils.indexer_api import cleanup_deleted_project, cleanup_deleted_connection
-
+from seaqa_events.utils.seadb_api import SeaDBAPI
+from seaqa_events.utils import get_connection_all_table_names
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,8 @@ class CleanProjectConnectionsTimer(Thread):
     def _clear_deleted_project(self, project_uuid):
         resp = cleanup_deleted_project(project_uuid)
         if resp.get('success'):
+            seadb_api = SeaDBAPI()
+            seadb_api.delete_base(project_uuid)
             self._delete_deleted_project(project_uuid)
         else:
             logger.error('Fail to cleanup deleted project %s, error: %s', project_uuid, resp.get('error_msg'))
@@ -123,6 +126,7 @@ class CleanProjectConnectionsTimer(Thread):
     def _clear_deleted_connection(self, project_uuid, connection_id, connection_type):
         resp = cleanup_deleted_connection(project_uuid, connection_id, connection_type)
         if resp.get('success'):
+            self.cleanup_deleted_connection_tables(project_uuid, connection_id, connection_type)
             self._delete_deleted_connection(connection_id)
         else:
             logger.error('Fail to cleanup deleted connection %s, error: %s', connection_id, resp.get('error_msg'))
@@ -166,3 +170,19 @@ class CleanProjectConnectionsTimer(Thread):
             sql = """DELETE FROM project_connection WHERE id=:connection_id"""
             session.execute(text(sql), {'connection_id': connection_id})
             session.commit()
+
+    def cleanup_deleted_connection_tables(self, project_uuid, connection_id, connection_type):
+        table_names = set(get_connection_all_table_names(connection_id, connection_type))
+        if not table_names:
+            logger.warning('No SeaDB cleanup table mapping found for connection %s (type=%s)', connection_id, connection_type)
+            return
+
+        seadb_api = SeaDBAPI()
+        base_metadata = seadb_api.get_base_metadata(project_uuid)
+        tables = base_metadata.get('tables', []) or []
+
+        for table in tables:
+            table_name = table.get('name')
+            if table_name not in table_names:
+                continue
+            seadb_api.delete_table(project_uuid, table.get('id'))

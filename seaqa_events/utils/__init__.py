@@ -24,8 +24,33 @@ def get_connection_table_name(connection_type, connection_id):
         table_name = ConnectionType.SITE.value + '_' + str(connection_id)
     elif connection_type == ConnectionType.EMAIL.value:
         table_name = ConnectionType.EMAIL.value + '_' + 'thread_' + str(connection_id)
+    elif connection_type == ConnectionType.NOTION.value:
+        table_name = ConnectionType.NOTION.value + '_' + str(connection_id)
     return table_name
 
+def get_connection_all_table_names(connection_id, connection_type):
+    if connection_type == ConnectionType.GITHUB_ISSUE.value:
+        main_table = get_connection_table_name(ConnectionType.GITHUB_ISSUE.value, connection_id)
+        comment_table = ConnectionType.GITHUB_ISSUE.value + '_comments_' + str(connection_id)
+        return [main_table, comment_table]
+    if connection_type == ConnectionType.DISCOURSE_FORUM.value:
+        main_table = get_connection_table_name(ConnectionType.DISCOURSE_FORUM.value, connection_id)
+        reply_table = ConnectionType.DISCOURSE_FORUM.value + '_replies_' + str(connection_id)
+        return [main_table, reply_table]
+    if connection_type == ConnectionType.EMAIL.value:
+        email_table = ConnectionType.EMAIL.value + '_' + str(connection_id)
+        thread_table = get_connection_table_name(ConnectionType.EMAIL.value, connection_id)
+        return [email_table, thread_table]
+    if connection_type == ConnectionType.SITE.value:
+        main_table = get_connection_table_name(ConnectionType.SITE.value, connection_id)
+        return [main_table]
+    if connection_type == ConnectionType.SEAFILE.value:
+        main_table = get_connection_table_name(ConnectionType.SEAFILE.value, connection_id)
+        return [main_table]
+    if connection_type == ConnectionType.NOTION.value:
+        main_table = get_connection_table_name(ConnectionType.NOTION.value, connection_id)
+        return [main_table]
+    return []
 
 def uuid_str_to_36_chars(project_uuid):
     if isinstance(project_uuid, uuid.UUID):

@@ -7,6 +7,7 @@ class ConnectionType(Enum):
     DISCOURSE_FORUM = 'discourse_forum'
     SITE = 'site'
     SEAFILE = 'seafile'
+    NOTION = 'notion'
 
 class AIScenario(Enum):
     SUMMARY = 'summary'
