@@ -74,30 +74,21 @@ class _ConfigParser(object):
 def get_llm_price(models):
     if not models or not isinstance(models, list):
         return {}
-
-    result = {}
+    prices = {}
     for model in models:
-        if not isinstance(model, dict) or model.get('disable', False):
+        if not isinstance(model, dict):
             continue
-        if model.get('type') in ('other', 'hosted_vllm'):
-            required_fields = ('model', 'url', 'price')
-        else:
-            required_fields = ('model', 'key', 'price')
-        if not all(field in model for field in required_fields):
+        model_name = model.get('model')
+        price = model.get('price')
+        if not model_name or not isinstance(price, dict):
             continue
-        if not isinstance(model['price'], dict):
-            if not isinstance(model['price'], (int, float)):
-                continue
-            model['price'] = {
-                'input_tokens': model['price'],
-                'output_tokens': 0
-            }
-        elif 'input_tokens' not in model['price']:
+        if 'input_tokens' not in price:
             continue
-        elif 'output_tokens' not in model['price']:
-            model['price']['output_tokens'] = 0 # compatible for embedding models
-        result[model['model']] = model['price']
-    return result
+        prices[model_name] = {
+            'input_tokens': price.get('input_tokens', 0),
+            'output_tokens': price.get('output_tokens', 0),
+        }
+    return prices
 
 CONF_DIR = os.getenv('CONF_PATH', '/opt/seaqa/conf/')
 yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEAQA_CONFIG_NAME', 'seaqa_config.yaml'))
