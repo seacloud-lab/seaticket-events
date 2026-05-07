@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import time
 
+from seaqa_events.tasks.additional_credits_worker import AdditionalCreditsWorker
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
@@ -13,6 +14,7 @@ class App(object):
     def __init__(self, configs):
         # ai stats, listen redis and cron
         self.ai_stats_worker = AIStatsWorker(configs)
+        self.additional_credits_worker = AdditionalCreditsWorker(configs)
 
         # email notices sender
         self.email_notices_sender = EmailNoticesSender(configs)
@@ -32,6 +34,7 @@ class App(object):
     def serve_forever(self):
         # ai stats worker
         self.ai_stats_worker.start()
+        self.additional_credits_worker.start()
         
         self.email_notices_sender.start()
 
@@ -49,4 +52,3 @@ class App(object):
                 time.sleep(60)
         except KeyboardInterrupt:
             pass
-
