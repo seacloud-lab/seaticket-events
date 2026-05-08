@@ -106,42 +106,6 @@ class AdditionalCreditsService:
         finally:
             session.close()
 
-    def add_credits(self, org_id, credits):
-        """Increase an organization's purchased additional credits balance.
-
-        Args:
-            org_id (int): Organization id.
-            credits (float): Additional credits to add. Must be greater than 0.
-
-        Raises:
-            ValueError: If ``credits`` is not greater than 0.
-            Exception: Re-raises database errors after rolling back the
-                transaction.
-        """
-        credits = float(credits)
-        if credits <= 0:
-            raise ValueError('credits must be greater than 0')
-
-        session = self._db_session_class()
-        try:
-            session.execute(text('''
-                INSERT INTO additional_credits (org_id, credits, updated_at)
-                VALUES (:org_id, :credits, NOW())
-                ON DUPLICATE KEY UPDATE
-                    credits = credits + VALUES(credits),
-                    updated_at = VALUES(updated_at)
-            '''), {
-                'org_id': org_id,
-                'credits': credits,
-            })
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.exception('Failed to add additional credits for org_id %s: %s', org_id, e)
-            raise
-        finally:
-            session.close()
-
     def get_month_used_credits(self, org_id, today=None):
         """Return the organization's used AI credits for the current month.
 

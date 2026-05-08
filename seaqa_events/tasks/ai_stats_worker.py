@@ -175,6 +175,7 @@ class AIStatsWorker:
         VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
+        org_cost_delta = defaultdict(float)
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
             group_id = project_group_cache.get(project_uuid)
