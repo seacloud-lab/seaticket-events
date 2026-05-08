@@ -18,28 +18,28 @@ DEFAULT_ENABLED_ROLE_PERMISSIONS = {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': -1,
+        'ai_credit': 50,
         'can_use_advanced_customization': True,
     },
     TEAM_STARTER: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': -1,
+        'ai_credit': 500,
         'can_use_advanced_customization': True,
     },
     TEAM_PRO: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': -1,
+        'ai_credit': 2000,
         'can_use_advanced_customization': True,
     },
     TEAM_BUSINESS: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': True,
-        'ai_credit': -1,
+        'ai_credit': 10000,
         'can_use_advanced_customization': True,
     },
     TEAM_ENTERPRISE: {
@@ -69,6 +69,12 @@ class AdditionalCreditsService:
         self._configs = configs
 
     def _get_monthly_credit_by_role(self, role):
+        """Return the configured monthly AI credit quota for a role.
+
+        Returns:
+            float: Monthly credit quota for the role, or -1 when the role is
+                treated as unlimited / not configured.
+        """
         try:
             return float(get_enabled_role_permissions_by_role(role).get('ai_credit', -1))
         except (TypeError, ValueError):
@@ -76,6 +82,16 @@ class AdditionalCreditsService:
             return -1
 
     def get_monthly_credit_by_org_id(self, org_id):
+        """Resolve an organization's monthly AI credit quota from its role.
+
+        Returns:
+            float: Monthly credit quota for the org, or -1 when the org should
+                not be limited by monthly credits.
+
+        Raises:
+            This method does not raise on lookup failures. Database errors are
+            logged and the method falls back to -1.
+        """
         session = self._db_session_class()
         try:
             result = session.execute(
@@ -91,6 +107,17 @@ class AdditionalCreditsService:
             session.close()
 
     def add_credits(self, org_id, credits):
+        """Increase an organization's purchased additional credits balance.
+
+        Args:
+            org_id (int): Organization id.
+            credits (float): Additional credits to add. Must be greater than 0.
+
+        Raises:
+            ValueError: If ``credits`` is not greater than 0.
+            Exception: Re-raises database errors after rolling back the
+                transaction.
+        """
         credits = float(credits)
         if credits <= 0:
             raise ValueError('credits must be greater than 0')
@@ -116,6 +143,15 @@ class AdditionalCreditsService:
             session.close()
 
     def get_month_used_credits(self, org_id, today=None):
+        """Return the organization's used AI credits for the current month.
+
+        Cost is stored in ``ai_usage_statistics.cost`` and converted to credits
+        with the current ``cost * 100`` rule.
+
+        Returns:
+            float: Credits already consumed in the target month. Falls back to
+                0 when the query fails.
+        """
         month_today = today or date.today()
         month_start = month_today.replace(day=1)
         session = self._db_session_class()
@@ -137,6 +173,33 @@ class AdditionalCreditsService:
             session.close()
 
     def deduct_overflow_credits(self, org_id, cost_delta):
+        """Deduct purchased credits for the newly overflowed monthly usage.
+
+        "Overflow" means the portion of this month's used credits that exceeds
+        the organization's monthly role quota. This method only deducts the
+        overflow newly introduced by the latest usage batch represented by
+        ``cost_delta``; it does not re-deduct overflow that already existed.
+
+        Args:
+            org_id (int): Organization id.
+            cost_delta (float): Newly added usage cost from the latest stats
+                batch. It is converted to credits with ``cost_delta * 100``.
+
+        Returns:
+            dict | None:
+                - ``None`` when ``cost_delta <= 0``.
+                - Otherwise a dict containing:
+                  ``org_id`` (int),
+                  ``monthly_credit`` (float),
+                  ``overflow_credits_to_deduct`` (float),
+                  ``deducted_from_additional`` (float, when deduction runs),
+                  ``not_covered`` (float, when deduction runs),
+                  ``additional_remaining`` (float or None).
+
+        Raises:
+            Exception: Re-raises database errors during the deduction
+                transaction after rolling back.
+        """
         cost_delta = float(cost_delta)
         if cost_delta <= 0:
             return None

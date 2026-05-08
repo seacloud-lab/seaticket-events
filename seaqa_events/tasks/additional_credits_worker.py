@@ -18,6 +18,7 @@ class AdditionalCreditsWorker:
         self._redis_client = RedisClient(configs, socket_timeout=10)
         self._additional_credits_service = AdditionalCreditsService(self._db_session_class, configs)
         self.channel = configs.get('ADDITIONAL_CREDITS_REDIS_CHANNEL', 'billing_ai_credits')
+        self._dedup_ttl = int(configs.get('ADDITIONAL_CREDITS_DEDUP_TTL', 7 * 24 * 60 * 60))
         self.log_none_message_timeout = 60 * 10
         self._enabled = True
 
@@ -64,14 +65,34 @@ class AdditionalCreditsWorker:
 
         org_id = data.get('org_id')
         credits = data.get('credits')
+        message_id = data.get('message_id')
         try:
             org_id = int(org_id)
             credits = float(credits)
         except (TypeError, ValueError):
             raise ValueError('org_id or credits invalid')
 
+        if message_id:
+            if not self._mark_message_processing(message_id):
+                logger.info(
+                    'Skip duplicated additional credits message, message_id=%s org_id=%s credits=%s',
+                    message_id,
+                    org_id,
+                    credits,
+                )
+                return
+
         self._additional_credits_service.add_credits(org_id, credits)
-        logger.info('Added additional credits from redis message for org_id=%s credits=%s', org_id, credits)
+        logger.info(
+            'Added additional credits from redis message for org_id=%s credits=%s message_id=%s',
+            org_id,
+            credits,
+            message_id,
+        )
+
+    def _mark_message_processing(self, message_id):
+        dedup_key = f'additional_credits:message:{message_id}'
+        return bool(self._redis_client.connection.set(dedup_key, 1, ex=self._dedup_ttl, nx=True))
 
     def start(self):
         if not self._enabled:
