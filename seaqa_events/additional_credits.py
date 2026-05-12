@@ -4,6 +4,8 @@ from datetime import date
 
 from sqlalchemy import text
 
+from seaqa_events.app.config import configs
+
 logger = logging.getLogger(__name__)
 
 TEAM_FREE = 'free'
@@ -18,28 +20,28 @@ DEFAULT_ENABLED_ROLE_PERMISSIONS = {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': 50,
+        'ai_credit': -1,
         'can_use_advanced_customization': True,
     },
     TEAM_STARTER: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': 500,
+        'ai_credit': -1,
         'can_use_advanced_customization': True,
     },
     TEAM_PRO: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': False,
-        'ai_credit': 2000,
+        'ai_credit': -1,
         'can_use_advanced_customization': True,
     },
     TEAM_BUSINESS: {
         'can_add_project': True,
         'can_add_group': True,
         'can_use_saml': True,
-        'ai_credit': 10000,
+        'ai_credit': -1,
         'can_use_advanced_customization': True,
     },
     TEAM_ENTERPRISE: {
@@ -52,15 +54,45 @@ DEFAULT_ENABLED_ROLE_PERMISSIONS = {
 }
 
 
+def merge_roles(default, custom, fallback_role):
+    merged_perms = {}
+    for role in default:
+        default_role_copy = default[fallback_role].copy()
+        default_role_copy.update(default[role])
+        merged_perms[role] = default_role_copy
+
+    for role in custom:
+        if role in merged_perms:
+            default_role_copy = merged_perms[role].copy()
+        else:
+            default_role_copy = default[fallback_role].copy()
+        default_role_copy.update(custom[role])
+        merged_perms[role] = default_role_copy
+
+    return merged_perms
+
+
+try:
+    custom_role_permissions = configs.get('ENABLED_ROLE_PERMISSIONS', {})
+except AttributeError:
+    custom_role_permissions = {}
+
+ENABLED_ROLE_PERMISSIONS = merge_roles(
+    DEFAULT_ENABLED_ROLE_PERMISSIONS,
+    custom_role_permissions,
+    fallback_role=TEAM_FREE,
+)
+
+
 def get_enabled_role_permissions_by_role(role):
     if not role:
         role = TEAM_FREE
 
-    if role not in DEFAULT_ENABLED_ROLE_PERMISSIONS:
+    if role not in ENABLED_ROLE_PERMISSIONS:
         logger.warning('%s is not a valid role, use default role.', role)
         role = TEAM_FREE
 
-    return DEFAULT_ENABLED_ROLE_PERMISSIONS[role]
+    return ENABLED_ROLE_PERMISSIONS[role]
 
 
 class AdditionalCreditsService:
@@ -79,7 +111,7 @@ class AdditionalCreditsService:
             return float(get_enabled_role_permissions_by_role(role).get('ai_credit', -1))
         except (TypeError, ValueError):
             logger.warning('Invalid default ai_credit config for role %s', role)
-            return -1
+            return 0
 
     def get_monthly_credit_by_org_id(self, org_id):
         """Resolve an organization's monthly AI credit quota from its role.
@@ -102,7 +134,7 @@ class AdditionalCreditsService:
             return self._get_monthly_credit_by_role(role)
         except Exception as e:
             logger.exception('Failed to get monthly credit by org_id %s: %s', org_id, e)
-            return -1
+            return 0
         finally:
             session.close()
 
