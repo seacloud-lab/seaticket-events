@@ -68,7 +68,7 @@ class CountIssuesTimer(Thread):
         self._db_session_class = db_session_class
         self._redis_client = RedisClient(configs, socket_timeout=10)
         self.seaqa_db = SeaqaDB(self._db_session_class)
-        self.seadb_api = SeaDBAPI(username='seaqa-events')
+        self.seadb_api = SeaDBAPI()
         self._upsert_batch_size = 50
         self._pending_projects = self._new_pending_projects()
         self._pending_lock = Lock()
