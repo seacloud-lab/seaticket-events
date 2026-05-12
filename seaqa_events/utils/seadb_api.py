@@ -8,6 +8,7 @@ from seaqa_events.utils import get_connection_table_name, uuid_str_to_36_chars
 
 
 logger = logging.getLogger(__name__)
+SEADB_COMPONENT_USERNAME = 'seaqa-events'
 
 
 def parse_response(response):
@@ -21,7 +22,7 @@ def parse_response(response):
 
 
 class SeaDBAPI:
-    def __init__(self, username='', timeout=30):
+    def __init__(self, username=SEADB_COMPONENT_USERNAME, timeout=30):
         self.timeout = timeout
         self.secret_key = SEADB_SERVER_ACCESS_TOKEN
         self.server_url = SEADB_SERVER_URL

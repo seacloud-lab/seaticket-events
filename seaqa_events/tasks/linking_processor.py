@@ -67,7 +67,7 @@ class LinkingWorker(Thread):
     def __init__(self, configs):
         super().__init__(name='linking_processor_worker')
         self._redis_client = RedisClient(configs, socket_timeout=10)
-        self.seadb_api = SeaDBAPI(username='seaqa-events')
+        self.seadb_api = SeaDBAPI()
         db_session_class = init_db_session_class(configs)
         self.seaqa_db = SeaqaDB(db_session_class)
         self.finished = Event()
