@@ -9,7 +9,7 @@ from seaqa_events.app.config import configs
 logger = logging.getLogger(__name__)
 
 TEAM_FREE = 'free'
-TEAM_STARTER = 'start'
+TEAM_STARTER = 'starter'
 TEAM_PRO = 'pro'
 TEAM_BUSINESS = 'business'
 TEAM_ENTERPRISE = 'enterprise'
@@ -71,9 +71,8 @@ def merge_roles(default, custom, fallback_role):
 
     return merged_perms
 
-
 try:
-    custom_role_permissions = configs.get('ENABLED_ROLE_PERMISSIONS', {})
+    custom_role_permissions = configs.ENABLED_ROLE_PERMISSIONS
 except AttributeError:
     custom_role_permissions = {}
 
@@ -100,19 +99,6 @@ class AdditionalCreditsService:
         self._db_session_class = db_session_class
         self._configs = configs
 
-    def _get_monthly_credit_by_role(self, role):
-        """Return the configured monthly AI credit quota for a role.
-
-        Returns:
-            float: Monthly credit quota for the role, or -1 when the role is
-                treated as unlimited / not configured.
-        """
-        try:
-            return float(get_enabled_role_permissions_by_role(role).get('ai_credit', -1))
-        except (TypeError, ValueError):
-            logger.warning('Invalid default ai_credit config for role %s', role)
-            return 0
-
     def get_monthly_credit_by_org_id(self, org_id):
         """Resolve an organization's monthly AI credit quota from its role.
 
@@ -131,10 +117,14 @@ class AdditionalCreditsService:
                 {'org_id': org_id},
             ).fetchone()
             role = (result[0] if result and result[0] else 'free').strip().lower()
-            return self._get_monthly_credit_by_role(role)
+            try:
+                return float(get_enabled_role_permissions_by_role(role).get('ai_credit', -1))
+            except (TypeError, ValueError):
+                logger.warning('Invalid default ai_credit config for role %s', role)
+                return -1
         except Exception as e:
             logger.exception('Failed to get monthly credit by org_id %s: %s', org_id, e)
-            return 0
+            return -1
         finally:
             session.close()
 
@@ -209,10 +199,15 @@ class AdditionalCreditsService:
                 'additional_remaining': None,
             }
 
+        # Total credits consumed so far this month (cost × 100).
         current_used_credits = self.get_month_used_credits(org_id)
+        # Credits exceeding the monthly role quota right now.
         current_overflow = max(0.0, current_used_credits - monthly_credit)
+        # Credits consumed *before* the latest batch was added, bounded at zero.
         previous_used_credits = max(0.0, current_used_credits - cost_delta * 100)
+        # Overflow that already existed before this batch (already paid for).
         previous_overflow = max(0.0, previous_used_credits - monthly_credit)
+        # Only deduct the *newly introduced* overflow so we never double-charge.
         overflow_credits_to_deduct = current_overflow - previous_overflow
 
         if overflow_credits_to_deduct <= 0:

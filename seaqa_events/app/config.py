@@ -2,6 +2,8 @@
 import logging
 import os
 import json
+import re
+import sys
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,19 @@ class _ConfigParser(object):
             logger.error(f'Failure to read YAML config file: {e}')
             raise
 
+    def __getattr__(self, name):
+        """Delegate to module-level globals for dynamic settings loaded via
+        load_local_settings. This allows ``configs.ENABLED_ROLE_PERMISSIONS``
+        to resolve settings that seaqa_web_settings injected into the config
+        module namespace.
+        """
+        if name.startswith('_'):
+            raise AttributeError(name)
+        g = globals()
+        if name in g:
+            return g[name]
+        raise AttributeError(name)
+
     @_check_type
     def get(self, key, default=None):
         if key in os.environ:
@@ -100,3 +115,30 @@ SEADB_SERVER_ACCESS_TOKEN = configs.get('SEADB_SERVER_ACCESS_TOKEN', '')
 SEAQA_INDEXER_INNER_SERVER_URL = configs.get('SEAQA_INDEXER_INNER_SERVER_URL', 'http://seaqa-indexer:8888')
 
 SEAQA_WEB_DIR = os.getenv('SEAQA_WEB_DIR', '/data/dev/seaqa-web')
+
+def load_local_settings(module):
+    '''Import any symbols that begin with A-Z. Append to lists any symbols
+    that begin with "EXTRA_".
+    '''
+    for attr in dir(module):
+        match = re.search(r'^EXTRA_(\w+)', attr)
+        if match:
+            name = match.group(1)
+            value = getattr(module, attr)
+            try:
+                globals()[name] += value
+            except KeyError:
+                globals()[name] = value
+        elif re.search(r'^[A-Z]', attr):
+            globals()[attr] = getattr(module, attr)
+
+try:
+    if os.path.exists(CONF_DIR):
+        sys.path.insert(0, CONF_DIR)
+    import seaqa_web_settings
+except ImportError:
+    pass
+else:
+    load_local_settings(seaqa_web_settings)
+    del seaqa_web_settings
+
