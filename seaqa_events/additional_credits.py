@@ -113,7 +113,7 @@ class AdditionalCreditsService:
         session = self._db_session_class()
         try:
             result = session.execute(
-                text('SELECT role FROM org_settings WHERE org_id=:org_id LIMIT 1'),
+                text('SELECT role FROM organizations_orgsettings WHERE org_id=:org_id LIMIT 1'),
                 {'org_id': org_id},
             ).fetchone()
             role = (result[0] if result and result[0] else 'free').strip().lower()
