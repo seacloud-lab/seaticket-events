@@ -116,29 +116,18 @@ SEAQA_INDEXER_INNER_SERVER_URL = configs.get('SEAQA_INDEXER_INNER_SERVER_URL', '
 
 SEAQA_WEB_DIR = os.getenv('SEAQA_WEB_DIR', '/data/dev/seaqa-web')
 
-def load_local_settings(module):
-    '''Import any symbols that begin with A-Z. Append to lists any symbols
-    that begin with "EXTRA_".
-    '''
-    for attr in dir(module):
-        match = re.search(r'^EXTRA_(\w+)', attr)
-        if match:
-            name = match.group(1)
-            value = getattr(module, attr)
-            try:
-                globals()[name] += value
-            except KeyError:
-                globals()[name] = value
-        elif re.search(r'^[A-Z]', attr):
-            globals()[attr] = getattr(module, attr)
+if not SEAQA_WEB_DIR:
+    logging.critical("SEAQA_WEB_DIR is not set")
+    raise RuntimeError("SEAQA_WEB_DIR is not set")
+if not os.path.exists(SEAQA_WEB_DIR):
+    logging.critical("SEAQA_WEB_DIR does not exist")
+    raise RuntimeError("SEAQA_WEB_DIR does not exist")
+
+sys.path.insert(0, SEAQA_WEB_DIR)
 
 try:
-    if os.path.exists(CONF_DIR):
-        sys.path.insert(0, CONF_DIR)
-    import seaqa_web_settings
+    import seahub.settings as seaqa_web_settings
+    ENABLED_ROLE_PERMISSIONS = getattr(seaqa_web_settings, 'ENABLED_ROLE_PERMISSIONS', {})
 except ImportError:
-    pass
-else:
-    load_local_settings(seaqa_web_settings)
-    del seaqa_web_settings
-
+    logging.critical("Failed to import seahub.settings")
+    raise RuntimeError("Failed to import seahub.settings")

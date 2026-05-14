@@ -4,7 +4,7 @@ from datetime import date
 
 from sqlalchemy import text
 
-from seaqa_events.app.config import configs
+from seaqa_events.app.config import ENABLED_ROLE_PERMISSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -15,73 +15,6 @@ TEAM_BUSINESS = 'business'
 TEAM_ENTERPRISE = 'enterprise'
 
 
-DEFAULT_ENABLED_ROLE_PERMISSIONS = {
-    TEAM_FREE: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_STARTER: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_PRO: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_BUSINESS: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': True,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_ENTERPRISE: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': True,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-}
-
-
-def merge_roles(default, custom, fallback_role):
-    merged_perms = {}
-    for role in default:
-        default_role_copy = default[fallback_role].copy()
-        default_role_copy.update(default[role])
-        merged_perms[role] = default_role_copy
-
-    for role in custom:
-        if role in merged_perms:
-            default_role_copy = merged_perms[role].copy()
-        else:
-            default_role_copy = default[fallback_role].copy()
-        default_role_copy.update(custom[role])
-        merged_perms[role] = default_role_copy
-
-    return merged_perms
-
-try:
-    custom_role_permissions = configs.ENABLED_ROLE_PERMISSIONS
-except AttributeError:
-    custom_role_permissions = {}
-
-ENABLED_ROLE_PERMISSIONS = merge_roles(
-    DEFAULT_ENABLED_ROLE_PERMISSIONS,
-    custom_role_permissions,
-    fallback_role=TEAM_FREE,
-)
-
 
 def get_enabled_role_permissions_by_role(role):
     if not role:
@@ -90,7 +23,6 @@ def get_enabled_role_permissions_by_role(role):
     if role not in ENABLED_ROLE_PERMISSIONS:
         logger.warning('%s is not a valid role, use default role.', role)
         role = TEAM_FREE
-
     return ENABLED_ROLE_PERMISSIONS[role]
 
 
