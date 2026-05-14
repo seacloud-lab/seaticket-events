@@ -62,19 +62,6 @@ class _ConfigParser(object):
             logger.error(f'Failure to read YAML config file: {e}')
             raise
 
-    def __getattr__(self, name):
-        """Delegate to module-level globals for dynamic settings loaded via
-        load_local_settings. This allows ``configs.ENABLED_ROLE_PERMISSIONS``
-        to resolve settings that seaqa_web_settings injected into the config
-        module namespace.
-        """
-        if name.startswith('_'):
-            raise AttributeError(name)
-        g = globals()
-        if name in g:
-            return g[name]
-        raise AttributeError(name)
-
     @_check_type
     def get(self, key, default=None):
         if key in os.environ:
