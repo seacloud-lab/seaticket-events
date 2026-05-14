@@ -23,7 +23,7 @@ def get_enabled_role_permissions_by_role(role):
     if role not in ENABLED_ROLE_PERMISSIONS:
         logger.warning('%s is not a valid role, use default role.', role)
         role = TEAM_FREE
-    return ENABLED_ROLE_PERMISSIONS[role]
+    return ENABLED_ROLE_PERMISSIONS.get(role, {})
 
 
 class AdditionalCreditsService:
