@@ -12,7 +12,6 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dateutil import relativedelta
 from sqlalchemy import text
 
-from seaqa_events.additional_credits import AdditionalCreditsService
 from seaqa_events.app.config import AI_PRICES
 from seaqa_events.app.event_redis import RedisClient
 from seaqa_events.db import init_db_session_class
@@ -23,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 class AIStatsWorker:
-    def __init__(self, configs):
+    def __init__(self, configs, additional_credits_service=None):
         self._db_session_class = init_db_session_class(configs)
         self._redis_client = RedisClient(configs, socket_timeout=10)
-        self._additional_credits_service = AdditionalCreditsService(self._db_session_class, configs)
+        self._additional_credits_service = additional_credits_service
         self.stats_lock = Lock()
         self.channel = 'log_ai_model_usage'
         self.keep_months = 3

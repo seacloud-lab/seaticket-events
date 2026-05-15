@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import time
 
+from seaqa_events.services.additional_credits import AdditionalCreditsService
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
@@ -11,8 +12,11 @@ from seaqa_events.tasks.linking_processor import LinkingProcessor
 
 class App(object):
     def __init__(self, configs):
+        # additional credits service
+        self.additional_credits_service = AdditionalCreditsService(configs)
+
         # ai stats, listen redis and cron
-        self.ai_stats_worker = AIStatsWorker(configs)
+        self.ai_stats_worker = AIStatsWorker(configs, self.additional_credits_service)
 
         # email notices sender
         self.email_notices_sender = EmailNoticesSender(configs)

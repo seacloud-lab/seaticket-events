@@ -2,7 +2,6 @@
 import logging
 import os
 import json
-import re
 import sys
 import yaml
 

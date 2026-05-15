@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from sqlalchemy import text
-
+from seaqa_events.db import init_db_session_class
 from seaqa_events.app.config import ENABLED_ROLE_PERMISSIONS
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ def get_enabled_role_permissions_by_role(role):
 
 
 class AdditionalCreditsService:
-    def __init__(self, db_session_class, configs):
-        self._db_session_class = db_session_class
+    def __init__(self, configs):
+        self._db_session_class = init_db_session_class(configs)
         self._configs = configs
 
     def get_monthly_credit_by_org_id(self, org_id):
