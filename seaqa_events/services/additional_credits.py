@@ -4,7 +4,7 @@ from datetime import date
 
 from sqlalchemy import text
 from seaqa_events.db import init_db_session_class
-from seaqa_events.app.config import CUSTOM_ROLE_PERMISSIONS
+from seaqa_events.app.config import ENABLED_ROLE_PERMISSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -13,87 +13,6 @@ TEAM_STARTER = 'starter'
 TEAM_PRO = 'pro'
 TEAM_BUSINESS = 'business'
 TEAM_ENTERPRISE = 'enterprise'
-
-
-def merge_roles(default, custom, fallback_role):
-    """
-        used for both user role perms and admin role perms
-        because two have same structure
-
-        user's role should use 'default' as fallback_role
-        admin'r role should use 'dummy_admin' as fallback_role, which set all perms to False
-
-        merge all role's permission based on fallback_role
-        inherit prority order (descending order):
-            attr in custom setting
-            attr in this file except fallback_role
-            attr in fallback_role
-    """
-    merged_perms = {}
-    for role in default:
-        default_role_copy = default[fallback_role].copy()
-        default_role_copy.update(default[role])
-        merged_perms[role] = default_role_copy
-
-    for role in custom:
-        if role in merged_perms:
-            default_role_copy = merged_perms[role].copy()
-        else:
-            default_role_copy = default[fallback_role].copy()
-        default_role_copy.update(custom[role])
-        merged_perms[role] = default_role_copy
-
-    return merged_perms
-
-
-DEFAULT_ENABLED_ROLE_PERMISSIONS = {
-    TEAM_FREE: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_STARTER: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_PRO: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': False,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_BUSINESS: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': True,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-    TEAM_ENTERPRISE: {
-        'can_add_project': True,
-        'can_add_group': True,
-        'can_use_saml': True,
-        'ai_credit': -1,
-        'can_use_advanced_customization': True,
-    },
-}
-
-try:
-    custom_role_permissions = CUSTOM_ROLE_PERMISSIONS
-except AttributeError:
-    custom_role_permissions = {}
-
-ENABLED_ROLE_PERMISSIONS = merge_roles(
-    DEFAULT_ENABLED_ROLE_PERMISSIONS,
-    custom_role_permissions,
-    fallback_role=TEAM_FREE
-)
 
 
 def get_enabled_role_permissions_by_role(role):
