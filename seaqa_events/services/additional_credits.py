@@ -4,7 +4,7 @@ from datetime import date
 
 from sqlalchemy import text
 from seaqa_events.db import init_db_session_class
-from seaqa_events.app.config import ENABLED_ROLE_PERMISSIONS
+from seaqa_events.app.config import ROLE_PERMISSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,10 @@ def get_enabled_role_permissions_by_role(role):
     if not role:
         role = TEAM_FREE
 
-    if role not in ENABLED_ROLE_PERMISSIONS:
+    if role not in ROLE_PERMISSIONS:
         logger.warning('%s is not a valid role, use default role.', role)
         role = TEAM_FREE
-    return ENABLED_ROLE_PERMISSIONS.get(role, {})
+    return ROLE_PERMISSIONS.get(role, {})
 
 
 class AdditionalCreditsService:
