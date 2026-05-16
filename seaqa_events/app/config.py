@@ -2,7 +2,6 @@
 import logging
 import os
 import json
-import sys
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -101,19 +100,4 @@ SEADB_SERVER_ACCESS_TOKEN = configs.get('SEADB_SERVER_ACCESS_TOKEN', '')
 SEAQA_INDEXER_INNER_SERVER_URL = configs.get('SEAQA_INDEXER_INNER_SERVER_URL', 'http://seaqa-indexer:8888')
 
 SEAQA_WEB_DIR = os.getenv('SEAQA_WEB_DIR', '/data/dev/seaqa-web')
-
-if not SEAQA_WEB_DIR:
-    logging.critical("SEAQA_WEB_DIR is not set")
-    raise RuntimeError("SEAQA_WEB_DIR is not set")
-if not os.path.exists(SEAQA_WEB_DIR):
-    logging.critical("SEAQA_WEB_DIR does not exist")
-    raise RuntimeError("SEAQA_WEB_DIR does not exist")
-
-sys.path.insert(0, SEAQA_WEB_DIR)
-
-try:
-    import seahub.settings as seaqa_web_settings
-    ENABLED_ROLE_PERMISSIONS = getattr(seaqa_web_settings, 'ENABLED_ROLE_PERMISSIONS', {})
-except ImportError:
-    logging.critical("Failed to import seahub.settings")
-    raise RuntimeError("Failed to import seahub.settings")
+CUSTOM_ROLE_PERMISSIONS = configs.get('ENABLED_ROLE_PERMISSIONS', {})
