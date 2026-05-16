@@ -22,9 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 class AIStatsWorker:
-    def __init__(self, configs):
+    def __init__(self, configs, additional_credits_service=None):
         self._db_session_class = init_db_session_class(configs)
         self._redis_client = RedisClient(configs, socket_timeout=10)
+        self._additional_credits_service = additional_credits_service
         self.stats_lock = Lock()
         self.channel = 'log_ai_model_usage'
         self.keep_months = 3
@@ -173,6 +174,7 @@ class AIStatsWorker:
         VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
+        org_cost_delta = defaultdict(float)
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
             group_id = project_group_cache.get(project_uuid)
@@ -200,6 +202,8 @@ class AIStatsWorker:
                     'created_at': now,
                     'updated_at': now
                 })
+                if org_id is not None:
+                    org_cost_delta[org_id] += cost
 
         # Execute database operations
         session = self._db_session_class()
@@ -231,7 +235,22 @@ class AIStatsWorker:
             logger.exception(e)
         finally:
             session.close()
-    
+        for org_id, cost_delta in org_cost_delta.items():
+            try:
+                result = self._additional_credits_service.deduct_overflow_credits(org_id, cost_delta)
+                if result and result.get('overflow_credits_to_deduct'):
+                    logger.info(
+                        'Deduct additional credits for org_id=%s monthly_credit=%s overflow=%s deducted=%s not_covered=%s remaining=%s',
+                        org_id,
+                        result.get('monthly_credit'),
+                        result.get('overflow_credits_to_deduct'),
+                        result.get('deducted_from_additional'),
+                        result.get('not_covered'),
+                        result.get('additional_remaining'),
+                    )
+            except Exception as e:
+                logger.exception('Failed to deduct additional credits for org_id=%s: %s', org_id, e)
+
     def _get_org_id_by_project_uuid(self, project_uuid):
         session = self._db_session_class()
         org_id = None
