@@ -39,7 +39,7 @@ class AIStatsWorker:
         self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
         # { project_uuid: org_id } - cache to avoid repeated database queries
         self.project_org_cache = {}
-        self.project_group_cache = {}
+        self.project_workspace_owner_cache = {}
 
     def save_to_memory(self, usage_info):
         """
@@ -47,8 +47,10 @@ class AIStatsWorker:
         {
             'model': 'gpt-4o-mini-2024-07-18',
             'usage': {'prompt_tokens': 1678, 'completion_tokens': 35, 'total_tokens': 1713},
-            'username': 'seaqa-indexer',
-            'project_uuid': '5680b4426dc0418b9e2ae176627f4d94'
+            'project_uuid': '5680b4426dc0418b9e2ae176627f4d94',
+            'scenario': 'chat',
+            'org_id': 1
+
         }
         """
         if not usage_info.get('model'):
@@ -90,18 +92,17 @@ class AIStatsWorker:
                     return
         self.project_org_cache[project_uuid] = org_id
         
-        if project_uuid in self.project_group_cache:
-            group_id = self.project_group_cache[project_uuid]
+        if project_uuid in self.project_workspace_owner_cache:
+            workspace_owner = self.project_workspace_owner_cache[project_uuid]
         else:
-            group_id = self._get_group_id_by_project_uuid(project_uuid)
-            if group_id is None:
+            workspace_owner = self._get_workspace_owner_by_project_uuid(project_uuid)
+            if workspace_owner is None:
                 logger.warning('Workspace of project %s not found', project_uuid)
                 return
-        self.project_group_cache[project_uuid] = group_id
+            self.project_workspace_owner_cache[project_uuid] = workspace_owner
 
         # project_stats
-        username = usage_info.get('username')
-        key = (model, username, scenario)
+        key = (model, scenario)
         stats = self.ai_usage_stats[project_uuid][key]
         stats['input_tokens'] += input_tokens
         stats['output_tokens'] += output_tokens
@@ -145,7 +146,7 @@ class AIStatsWorker:
         with self.stats_lock:
             project_stats = deepcopy(self.ai_usage_stats)
             project_org_cache = deepcopy(self.project_org_cache)
-            project_group_cache = deepcopy(self.project_group_cache)
+            project_workspace_owner_cache = deepcopy(self.project_workspace_owner_cache)
             self.reset_stats()
 
         logger.debug('There are %s project stats', len(project_stats))
@@ -157,7 +158,7 @@ class AIStatsWorker:
         # due to only has key `id` is unique, so the update will be performed using multiple SQL statements.
         select_sql = '''
         SELECT `id` FROM `ai_usage_statistics`
-        WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `username`=:username AND `scenario`=:scenario
+        WHERE `project_uuid`=:project_uuid AND `date`=:date AND `model`=:model AND `owner`=:owner AND `group_id`=:group_id AND `scenario`=:scenario
         LIMIT 1
         '''
         update_sql = '''
@@ -169,28 +170,36 @@ class AIStatsWorker:
         WHERE `id`=:id
         '''
         insert_sql = '''
-        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `username`, `group_id`, `org_id`, `scenario`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :username, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `owner`, `group_id`, `org_id`, `scenario`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :owner, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         project_data = []
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
-            group_id = project_group_cache.get(project_uuid)
-            for (model, username, scenario), usage in stats_dict.items():
+            workspace_owner = project_workspace_owner_cache.get(project_uuid)
+            for (model, scenario), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 input_tokens_price = AI_PRICES[model].get('input_tokens', 0)
                 output_tokens_price = AI_PRICES[model].get('output_tokens', 0)
                 cost = input_tokens_price * (input_tokens / 1e6) + output_tokens_price * (output_tokens / 1e6)
 
-                logger.debug('project %s model %s username %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
-                           project_uuid, model, username, scenario, org_id, input_tokens, output_tokens, cost)
+                owner = None
+                group_id = None
+
+                if workspace_owner.endswith('@seafile_group'):
+                    group_id = int(workspace_owner.rsplit('@seafile_group', 1)[0])
+                else:
+                    owner = workspace_owner
+
+                logger.debug('project %s model %s owner %s group_id %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
+                           project_uuid, model, owner, group_id, scenario, org_id, input_tokens, output_tokens, cost)
 
                 project_data.append({
                     'project_uuid': project_uuid,
                     'date': today,
                     'model': model,
-                    'username': username,
+                    'owner': owner,
                     'group_id': group_id,
                     'org_id': org_id,
                     'scenario': scenario,
@@ -211,7 +220,8 @@ class AIStatsWorker:
                     'project_uuid': data['project_uuid'],
                     'date': data['date'],
                     'model': data['model'],
-                    'username': data['username'],
+                    'owner': data['owner'],
+                    'group_id': data['group_id'],
                     'scenario': data['scenario'],
                 }).fetchone()
 
@@ -250,7 +260,7 @@ class AIStatsWorker:
         finally:
             session.close()
     
-    def _get_group_id_by_project_uuid(self, project_uuid):
+    def _get_workspace_owner_by_project_uuid(self, project_uuid):
         session = self._db_session_class()
         try:
             sql = """SELECT workspace_id FROM projects WHERE uuid=:project_uuid AND deleted=false"""
@@ -260,9 +270,8 @@ class AIStatsWorker:
                 sql = """SELECT owner FROM workspaces WHERE id=:workspace_id AND deleted=false"""
                 workspace = session.execute(text(sql), {'workspace_id': workspace_id}).fetchone()
                 if workspace:
-                    if workspace[0].endswith('@seafile_group'):
-                        return int(workspace[0].rsplit('@seafile_group', 1)[0])
-                    return -1
+                    return workspace[0]
+
         except Exception as e:
             logger.exception(e)
         finally:
