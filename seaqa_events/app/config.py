@@ -72,6 +72,19 @@ class _ConfigParser(object):
         return self.yaml_configs.get(key, default)
     
 def get_llm_price(models):
+    """
+    Configs support:
+    Type A: for common LLMs
+    - ...
+      price:
+        input_tokens: float # / (M Tokens)
+        output_tokens: float # / (M Tokens)
+
+    Type B: for embeddings or other models
+    EMBEDDING_MODEL:
+      ...
+      price: float # / (M Tokens)
+    """
     if not models or not isinstance(models, list):
         return {}
     prices = {}
@@ -79,15 +92,21 @@ def get_llm_price(models):
         if not isinstance(model, dict):
             continue
         model_name = model.get('model')
+        if not model_name:
+            continue
+
         price = model.get('price')
-        if not model_name or not isinstance(price, dict):
+        if isinstance(price, (float, int)):
+            prices[model_name] = {
+                'input_tokens': price,
+                'output_tokens': 0
+            }
             continue
-        if 'input_tokens' not in price:
-            continue
-        prices[model_name] = {
-            'input_tokens': price.get('input_tokens', 0),
-            'output_tokens': price.get('output_tokens', 0),
-        }
+        if isinstance(price, dict) and 'input_tokens' in price:
+            prices[model_name] = {
+                'input_tokens': price.get('input_tokens', 0),
+                'output_tokens': price.get('output_tokens', 0),
+            }
     return prices
 
 CONF_DIR = os.getenv('CONF_PATH', '/opt/seaqa/conf/')
