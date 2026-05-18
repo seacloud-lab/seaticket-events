@@ -72,6 +72,19 @@ class _ConfigParser(object):
         return self.yaml_configs.get(key, default)
     
 def get_llm_price(models):
+    """
+    Configs support:
+    Type A: for common LLMs
+    - ...
+      price:
+        input_tokens: float # / (M Tokens)
+        output_tokens: float # / (M Tokens)
+
+    Type B: for embeddings or other models
+    EMBEDDING_MODEL:
+      ...
+      price: float # / (M Tokens)
+    """
     if not models or not isinstance(models, list):
         return {}
     prices = {}
