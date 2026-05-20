@@ -5,7 +5,6 @@ import time
 from datetime import datetime
 from collections import defaultdict
 from copy import deepcopy
-from datetime import datetime
 from threading import Thread, Lock
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -261,6 +260,40 @@ class AIStatsWorker:
             except Exception as e:
                 logger.exception('Failed to deduct additional credits for org_id=%s: %s', org_id, e)
 
+        portal_data = [d for d in project_data if d.get('scenario') == AIScenario.PORTAL_CHAT.value]
+        if portal_data:
+            portal_upsert_sql = '''
+            INSERT INTO `portal_chat_usage_statistics`(
+                `project_uuid`, `date`, `model`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`
+            )
+            VALUES (
+                :project_uuid, :date, :model, :input_tokens, :output_tokens, :cost, :created_at, :updated_at
+            )
+            ON DUPLICATE KEY UPDATE
+                `input_tokens`=`input_tokens`+VALUES(`input_tokens`),
+                `output_tokens`=`output_tokens`+VALUES(`output_tokens`),
+                `cost`=`cost`+VALUES(`cost`),
+                `updated_at`=VALUES(`updated_at`)
+            '''
+            portal_session = self._db_session_class()
+            try:
+                for data in portal_data:
+                    portal_session.execute(text(portal_upsert_sql), {
+                        'project_uuid': data['project_uuid'],
+                        'date': data['date'],
+                        'model': data['model'],
+                        'input_tokens': data['input_tokens'],
+                        'output_tokens': data['output_tokens'],
+                        'cost': data['cost'],
+                        'created_at': data['created_at'],
+                        'updated_at': data['updated_at'],
+                    })
+                portal_session.commit()
+            except Exception as e:
+                logger.exception('Failed to dual-write portal-chat usage to portal_chat_usage_statistics: %s', e)
+            finally:
+                portal_session.close()
+
     def _get_org_id_by_project_uuid(self, project_uuid):
         session = self._db_session_class()
         org_id = None
@@ -316,9 +349,11 @@ class AIStatsWorker:
             logger.debug('Starts to clean old stats ai...')
             session = self._db_session_class()
             sql = "DELETE FROM `ai_usage_statistics` WHERE `date` < :clean_month"
+            portal_sql = "DELETE FROM `portal_chat_usage_statistics` WHERE `date` < :clean_month"
             clean_month = (datetime.now() - relativedelta.relativedelta(months=self.keep_months)).strftime('%Y-%m-01')
             try:
                 session.execute(text(sql), {'clean_month': clean_month})
+                session.execute(text(portal_sql), {'clean_month': clean_month})
                 session.commit()
             except Exception as e:
                 logger.exception(e)
