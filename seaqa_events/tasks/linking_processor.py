@@ -345,12 +345,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
-        if event_type in ('github_issue_comment_added', 'discourse_topic_reply_added'):
-            count = new_all
-            if isinstance(new_all, dict):
-                count = new_all.get('count')
-            return [_make_row(None, count)]
-        elif event_type == 'email_message_added':
+        if event_type == 'email_message_added':
             return [{
                 'ticket_id': linked_ticket,
                 'activity_type': event_type,
@@ -371,13 +366,17 @@ class LinkingWorker(Thread):
 
         # github
         if event_type == 'github_issue_comment_added':
-            comments = new_raw.get('comments') or []
-            return None, {'count': len(comments)}
+            return None, {
+                'count': 1,
+                'author': new_raw.get('author'),
+            }
 
         # discourse
-        if event_type == 'discourse_topic_reply_added':
-            replies = new_raw.get('replies') or []
-            return None, {'count': len(replies)}
+        if event_type == 'discourse_topic_comment_added':
+            return None, {
+                'count': 1,
+                'author': new_raw.get('author'),
+            }
 
         # email
         if event_type == 'email_message_added':
