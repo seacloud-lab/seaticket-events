@@ -12,6 +12,7 @@ from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.seadb_api import SeaDBAPI
 
 from seaqa_events.utils.constant import ISSUE_CONNECTION_TYPES
+from seaqa_events.seadb_models import SchemaTableNames, get_table_name_from_schema
 
 __all__ = [
     'IssuesCounter',
@@ -188,7 +189,8 @@ class CountIssuesTimer(Thread):
         self._mark_project_pending(project_uuid, 'ticket_changed')
 
     def _get_tickets_count(self, project_uuid):
-        sql = "SELECT COUNT(*) as count FROM `tickets` WHERE (`deleted` = False OR `deleted` IS NULL)"
+        table_name = get_table_name_from_schema(SchemaTableNames.TICKETS)
+        sql = f"SELECT COUNT(*) as count FROM `{table_name}` WHERE (`deleted` = False OR `deleted` IS NULL)"
         try:
             response = self.seadb_api.query_rows(project_uuid, sql)
             if response and 'results' in response and response['results']:
@@ -199,7 +201,7 @@ class CountIssuesTimer(Thread):
             return 0
 
     def _get_email_threads_count(self, project_uuid, connection_id):
-        table_name = f"email_thread_{connection_id}"
+        table_name = get_table_name_from_schema(SchemaTableNames.THREAD, connection_id)
         sql = f"SELECT COUNT(*) as count FROM `{table_name}`"
         try:
             response = self.seadb_api.query_rows(project_uuid, sql)
