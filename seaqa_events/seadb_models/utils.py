@@ -3,6 +3,14 @@ from seaqa_events.seadb_models.schema_loader import get_seadb_table_schemas
 from seaqa_events.seadb_models.models import SchemaTableNames
 
 
+class TableNameInvalidError(Exception):
+    pass
+
+
+class ColumnNameInvalidError(Exception):
+    pass
+
+
 SCHEMA_TABLE_NAME_CONNECTION = {
     ConnectionType.GITHUB_ISSUE.value: SchemaTableNames.GITHUB_ISSUES,
     ConnectionType.DISCOURSE_FORUM.value: SchemaTableNames.DISCOURSE_TOPICS,
@@ -29,23 +37,25 @@ def _resolve_table_name_by_schema_table_key(schema_table_name, connection_id=Non
 
 
 def get_table_name_from_schema(schema_table_name, connection_id=None):
+    """Resolve the actual seadb table name from the YAML schema for a given schema table name."""
     schema = get_seadb_table_schemas()
     tables = schema.get('tables') or {}
     table_schema = tables.get(schema_table_name) or {}
     table_name_schema = table_schema.get('table_name')
-    if table_name_schema:
-        return _resolve_table_name_by_schema_table_key(table_name_schema, connection_id)
-    return ''
+    table_name = _resolve_table_name_by_schema_table_key(table_name_schema, connection_id)
+    if not table_name:
+        raise TableNameInvalidError()
+    return table_name
 
 
 def get_column_name_from_schema(schema_table_name, column_name):
-    """Return the column_name defined in YAML schema, or empty string if column not found."""
+    """Return the column_name defined in YAML schema. Raises ColumnNameInvalidError if column not found."""
     schema = get_seadb_table_schemas()
     tables = schema.get('tables') or {}
     table_schema = tables.get(schema_table_name) or {}
     columns = table_schema.get('columns') or {}
-    if column_name in columns:
-        return column_name
-    return ''
+    if column_name not in columns:
+        raise ColumnNameInvalidError()
+    return column_name
 
 
