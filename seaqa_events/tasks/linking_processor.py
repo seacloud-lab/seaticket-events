@@ -9,7 +9,7 @@ from seaqa_events.db import init_db_session_class
 from seaqa_events.utils.seadb_api import SeaDBAPI
 from seaqa_events.utils.seaqa_db import SeaqaDB
 from seaqa_events.utils.constant import ConnectionType
-from seaqa_events.seadb_models import SchemaTableNames, get_table_name_from_schema
+from seaqa_events.seadb_models.models import SchemaTables
 from seaqa_events.utils import uuid_str_to_32_chars
 
 __all__ = ['LinkingProcessor']
@@ -208,11 +208,11 @@ class LinkingWorker(Thread):
         rows = self._build_activity_rows(linked_ticket, event_type, old_all, new_all, base_detail, now)
         if not rows:
             return 0
-        self.seadb_api.insert_rows(project_uuid, get_table_name_from_schema(SchemaTableNames.TICKET_ACTIVITIES), rows)
+        self.seadb_api.insert_rows(project_uuid, SchemaTables.TICKET_ACTIVITIES.table_name(), rows)
         return len(rows)
 
     def _handle_github_issue_event(self, project_uuid, record_id, connection_id, event):
-        issues_table = get_table_name_from_schema(SchemaTableNames.GITHUB_ISSUES, connection_id)
+        issues_table = SchemaTables.GITHUB_ISSUES.table_name(connection_id)
         select_fields = '`linked_ticket`, `issue_number`, `title`, `url`'
         context = self._load_linked_record_event_context(project_uuid, record_id, issues_table, select_fields, event)
         if not context:
@@ -234,7 +234,7 @@ class LinkingWorker(Thread):
         logger.info('inserted %d activity rows for ticket %s', inserted, linked_ticket)
 
     def _handle_discourse_topic_event(self, project_uuid, record_id, connection_id, event):
-        topics_table = get_table_name_from_schema(SchemaTableNames.DISCOURSE_TOPICS, connection_id)
+        topics_table = SchemaTables.DISCOURSE_TOPICS.table_name(connection_id)
         select_fields = '`linked_ticket`, `topic_id`, `title`, `slug`'
         context = self._load_linked_record_event_context(project_uuid, record_id, topics_table, select_fields, event)
         if not context:
@@ -271,7 +271,7 @@ class LinkingWorker(Thread):
         logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
 
     def _handle_email_thread_event(self, project_uuid, record_id, connection_id, event):
-        threads_table = get_table_name_from_schema(SchemaTableNames.THREAD, connection_id)
+        threads_table = SchemaTables.THREAD.table_name(connection_id)
         select_fields = '`linked_ticket`, `_pk`, `title`'
         context = self._load_linked_record_event_context(project_uuid, record_id, threads_table, select_fields, event)
         if not context:

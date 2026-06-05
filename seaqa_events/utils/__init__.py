@@ -10,15 +10,15 @@ logger = logging.getLogger(__name__)
 pyexec = None
 
 from seaqa_events.utils.constant import ConnectionType
-from seaqa_events.seadb_models.utils import get_table_name_from_schema, SCHEMA_TABLE_NAME_CONNECTION, SCHEMA_TABLE_NAME_CONNECTION_COMMENTS
+from seaqa_events.seadb_models.utils import SCHEMA_TABLE_NAME_CONNECTION, SCHEMA_TABLE_NAME_CONNECTION_COMMENTS
 
 
 def get_connection_table_name(connection_type, connection_id=None):
     """Resolve the primary table name for a given connection_type and optional connection_id."""
-    schema_table_name = SCHEMA_TABLE_NAME_CONNECTION.get(connection_type)
-    if not schema_table_name:
+    schema_table = SCHEMA_TABLE_NAME_CONNECTION.get(connection_type)
+    if not schema_table:
         return ''
-    return get_table_name_from_schema(schema_table_name, connection_id=connection_id)
+    return schema_table.table_name(connection_id=connection_id)
 
 
 def get_connection_all_table_names(connection_id, connection_type):
@@ -27,11 +27,11 @@ def get_connection_all_table_names(connection_id, connection_type):
     if not main_table:
         return []
 
-    table_names = [get_table_name_from_schema(main_table, connection_id)]
+    table_names = [main_table.table_name(connection_id)]
 
     comments_table = SCHEMA_TABLE_NAME_CONNECTION_COMMENTS.get(connection_type)
     if comments_table:
-        table_names.append(get_table_name_from_schema(comments_table, connection_id))
+        table_names.append(comments_table.table_name(connection_id))
 
     return table_names
 
