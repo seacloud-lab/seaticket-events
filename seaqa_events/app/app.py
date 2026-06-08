@@ -3,6 +3,7 @@ import time
 
 from seaqa_events.services.additional_credits import AdditionalCreditsService
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
+from seaqa_events.tasks.agent_run_logs_cleaner import AgentRunLogsCleaner
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
 from seaqa_events.tasks.project_connection_cleaner import ProjectConnectionCleaner
@@ -27,6 +28,9 @@ class App(object):
         # project/connection cleaner
         self.project_connection_cleaner = ProjectConnectionCleaner(configs)
 
+        # agent run logs cleaner
+        self.agent_run_logs_cleaner = AgentRunLogsCleaner(configs)
+
         # project issues counter
         self.issues_counter = IssuesCounter(configs)
 
@@ -42,6 +46,8 @@ class App(object):
         self.notification_cleaner.start()
 
         self.project_connection_cleaner.start()
+
+        self.agent_run_logs_cleaner.start()
 
         self.issues_counter.start()
 
