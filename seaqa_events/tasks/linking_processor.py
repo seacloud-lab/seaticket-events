@@ -27,6 +27,9 @@ GITHUB_ISSUE_DISPLAY_FIELDS = ['title', 'state', 'labels', 'assignees', 'issue_t
 # Fields from a Discourse topic row worth surfacing in the activity log
 DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
 
+# Fields from a general task row worth surfacing in the activity log
+GENERAL_TASK_DISPLAY_FIELDS = ['title', 'status', 'size', 'priority', 'assignees', 'version']
+
 
 
 class LinkingProcessor:
@@ -173,6 +176,15 @@ class LinkingWorker(Thread):
             except Exception as e:
                 logger.error('failed to handle email event (project=%s record=%s): %s', project_uuid, record_id, e)
 
+        elif source_type == ConnectionType.GENERAL_TASK.value:
+            connection_id = data.get('connection_id')
+            if connection_id is None:
+                return
+            try:
+                self._handle_general_task_event(project_uuid, record_id, connection_id, event)
+            except Exception as e:
+                logger.error('failed to handle general_task event (project=%s record=%s): %s', project_uuid, record_id, e)
+
     def _load_linked_record_event_context(self, project_uuid, record_id, table_name, select_fields, event):
         try:
             record_id = int(record_id)
@@ -291,6 +303,27 @@ class LinkingWorker(Thread):
             return
         logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
 
+    def _handle_general_task_event(self, project_uuid, record_id, connection_id, event):
+        tasks_table = f'{ConnectionType.GENERAL_TASK.value}_{connection_id}'
+        select_fields = '`linked_ticket`, `_pk`, `title`'
+        context = self._load_linked_record_event_context(project_uuid, record_id, tasks_table, select_fields, event)
+        if not context:
+            return
+
+        record_id, row_data, linked_ticket, event_type, old_all, new_all = context
+        base_detail = {
+            'connection_id': connection_id,
+            'record_id': record_id,
+            'task_id': row_data.get('_pk'),
+            'task_title': row_data.get('title', ''),
+        }
+        inserted = self._insert_ticket_activity_rows(
+            project_uuid, linked_ticket, event_type, old_all, new_all, base_detail
+        )
+        if not inserted:
+            return
+        logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
+
     def _build_activity_rows(self, linked_ticket, event_type, old_all, new_all, base_detail, now):
         def _make_row(old_value, new_value):
             return {
@@ -336,7 +369,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row(old_state or None, new_state or None))
             return rows
 
-        if event_type in ('github_issue_updated', 'discourse_topic_updated'):
+        if event_type in ('github_issue_updated', 'discourse_topic_updated', 'general_task_updated'):
             # one row per changed field
             old_obj = old_all or {}
             new_obj = new_all or {}
@@ -386,6 +419,8 @@ class LinkingWorker(Thread):
             display_fields = GITHUB_ISSUE_DISPLAY_FIELDS
         elif event_type.startswith('discourse_topic_'):
             display_fields = DISCOURSE_TOPIC_DISPLAY_FIELDS
+        elif event_type.startswith('general_task_'):
+            display_fields = GENERAL_TASK_DISPLAY_FIELDS
         else:
             return None, None
 
