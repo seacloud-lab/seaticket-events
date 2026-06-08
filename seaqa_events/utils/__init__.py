@@ -4,53 +4,37 @@ import sys
 import os
 import logging
 import subprocess
-import configparser
 
 
 logger = logging.getLogger(__name__)
 pyexec = None
 
 from seaqa_events.utils.constant import ConnectionType
+from seaqa_events.seadb_models.utils import SCHEMA_TABLE_NAME_CONNECTION, SCHEMA_TABLE_NAME_CONNECTION_COMMENTS
 
-def get_connection_table_name(connection_type, connection_id):
-    table_name = ''
-    if connection_type == ConnectionType.GITHUB_ISSUE.value:
-        table_name = ConnectionType.GITHUB_ISSUE.value + '_' + str(connection_id)
-    elif connection_type == ConnectionType.DISCOURSE_FORUM.value:
-        table_name = ConnectionType.DISCOURSE_FORUM.value + '_' + str(connection_id)
-    elif connection_type == ConnectionType.SEAFILE.value:
-        table_name = ConnectionType.SEAFILE.value + '_' + str(connection_id)
-    elif connection_type == ConnectionType.SITE.value:
-        table_name = ConnectionType.SITE.value + '_' + str(connection_id)
-    elif connection_type == ConnectionType.EMAIL.value:
-        table_name = ConnectionType.EMAIL.value + '_' + 'thread_' + str(connection_id)
-    elif connection_type == ConnectionType.NOTION.value:
-        table_name = ConnectionType.NOTION.value + '_' + str(connection_id)
-    return table_name
+
+def get_connection_table_name(connection_type, connection_id=None):
+    """Resolve the primary table name for a given connection_type and optional connection_id."""
+    schema_table = SCHEMA_TABLE_NAME_CONNECTION.get(connection_type)
+    if not schema_table:
+        return ''
+    return schema_table.table_name(connection_id=connection_id)
+
 
 def get_connection_all_table_names(connection_id, connection_type):
-    if connection_type == ConnectionType.GITHUB_ISSUE.value:
-        main_table = get_connection_table_name(ConnectionType.GITHUB_ISSUE.value, connection_id)
-        comment_table = ConnectionType.GITHUB_ISSUE.value + '_comments_' + str(connection_id)
-        return [main_table, comment_table]
-    if connection_type == ConnectionType.DISCOURSE_FORUM.value:
-        main_table = get_connection_table_name(ConnectionType.DISCOURSE_FORUM.value, connection_id)
-        reply_table = ConnectionType.DISCOURSE_FORUM.value + '_replies_' + str(connection_id)
-        return [main_table, reply_table]
-    if connection_type == ConnectionType.EMAIL.value:
-        email_table = ConnectionType.EMAIL.value + '_' + str(connection_id)
-        thread_table = get_connection_table_name(ConnectionType.EMAIL.value, connection_id)
-        return [email_table, thread_table]
-    if connection_type == ConnectionType.SITE.value:
-        main_table = get_connection_table_name(ConnectionType.SITE.value, connection_id)
-        return [main_table]
-    if connection_type == ConnectionType.SEAFILE.value:
-        main_table = get_connection_table_name(ConnectionType.SEAFILE.value, connection_id)
-        return [main_table]
-    if connection_type == ConnectionType.NOTION.value:
-        main_table = get_connection_table_name(ConnectionType.NOTION.value, connection_id)
-        return [main_table]
-    return []
+    """Return a list of all SeaDB table names belonging to a connection."""
+    main_table = SCHEMA_TABLE_NAME_CONNECTION.get(connection_type)
+    if not main_table:
+        return []
+
+    table_names = [main_table.table_name(connection_id)]
+
+    comments_table = SCHEMA_TABLE_NAME_CONNECTION_COMMENTS.get(connection_type)
+    if comments_table:
+        table_names.append(comments_table.table_name(connection_id))
+
+    return table_names
+
 
 def uuid_str_to_36_chars(project_uuid):
     if isinstance(project_uuid, uuid.UUID):
