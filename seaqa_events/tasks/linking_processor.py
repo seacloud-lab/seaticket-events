@@ -314,7 +314,6 @@ class LinkingWorker(Thread):
         base_detail = {
             'connection_id': connection_id,
             'record_id': record_id,
-            'task_id': row_data.get('_pk'),
             'task_title': row_data.get('title', ''),
         }
         inserted = self._insert_ticket_activity_rows(
