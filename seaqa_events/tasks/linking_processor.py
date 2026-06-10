@@ -28,7 +28,7 @@ GITHUB_ISSUE_DISPLAY_FIELDS = ['title', 'state', 'labels', 'assignees', 'issue_t
 DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
 
 # Fields from a general task row worth surfacing in the activity log
-GENERAL_TASK_DISPLAY_FIELDS = ['title', 'status', 'size', 'priority', 'assignees', 'version']
+GENERAL_TASK_DISPLAY_FIELDS = ['title', 'status', 'size', 'priority', 'assignees', 'version', 'due_date']
 
 
 
