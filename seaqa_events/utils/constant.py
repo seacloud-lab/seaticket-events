@@ -5,6 +5,7 @@ class ConnectionType(Enum):
     EMAIL = 'email'
     GITHUB_ISSUE = 'github_issue'
     DISCOURSE_FORUM = 'discourse_forum'
+    GENERAL_TASK = 'general_task'
     SITE = 'site'
     SEAFILE = 'seafile'
     NOTION = 'notion'
