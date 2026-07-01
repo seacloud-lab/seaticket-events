@@ -4,6 +4,7 @@ import time
 from seaqa_events.services.additional_credits import AdditionalCreditsService
 from seaqa_events.tasks.ai_stats_worker import AIStatsWorker
 from seaqa_events.tasks.agent_run_logs_cleaner import AgentRunLogsCleaner
+from seaqa_events.tasks.agent_auto_action_processor import AgentAutoActionProcessor
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
 from seaqa_events.tasks.project_connection_cleaner import ProjectConnectionCleaner
@@ -37,6 +38,9 @@ class App(object):
         # linking processor: records activity logs on tickets linked to data events
         self.linking_processor = LinkingProcessor(configs)
 
+        # auto action processor: consume agent auto action queue and trigger seahub command
+        self.auto_action_processor = AgentAutoActionProcessor(configs)
+
     def serve_forever(self):
         # ai stats worker
         self.ai_stats_worker.start()
@@ -52,6 +56,8 @@ class App(object):
         self.issues_counter.start()
 
         self.linking_processor.start()
+
+        self.auto_action_processor.start()
 
         # Keep main thread alive
         try:
