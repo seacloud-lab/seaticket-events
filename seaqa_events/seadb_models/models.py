@@ -23,3 +23,5 @@ class SchemaTables:
     GENERAL_TASK_USER = SCHEMA.GeneralTaskUserTable
     DISCORD_THREADS = SCHEMA.DiscordThreadsTable
     DISCORD_THREAD_MESSAGES = SCHEMA.DiscordThreadMessagesTable
+    CONFLUENCE = SCHEMA.ConfluenceTable
+    CONFLUENCE_USER = SCHEMA.ConfluenceUserTable
