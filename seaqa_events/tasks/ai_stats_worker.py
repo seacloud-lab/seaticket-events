@@ -36,10 +36,16 @@ class AIStatsWorker:
         self._enabled = configs.get('AI_STATS', {}).get('enabled', True)
 
     def reset_stats(self):
-        self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
-        self.portal_session_usage_stats = defaultdict(
-            lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0})
-        )
+        self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {
+            'input_tokens': 0,
+            'cached_tokens': 0,
+            'output_tokens': 0,
+        }))
+        self.portal_session_usage_stats = defaultdict(lambda: defaultdict(lambda: {
+            'input_tokens': 0,
+            'cached_tokens': 0,
+            'output_tokens': 0,
+        }))
         # { project_uuid: org_id } - cache to avoid repeated database queries
         self.project_org_cache = {}
         self.project_workspace_owner_cache = {}
@@ -49,7 +55,7 @@ class AIStatsWorker:
         usage_info:
         {
             'model': 'gpt-4o-mini-2024-07-18',
-            'usage': {'prompt_tokens': 1678, 'completion_tokens': 35, 'total_tokens': 1713},
+            'usage': {'prompt_tokens': 1678, 'cached_tokens': 1024, 'completion_tokens': 35, 'total_tokens': 1713},
             'project_uuid': '5680b4426dc0418b9e2ae176627f4d94',
             'scenario': 'chat',
             'org_id': 1
@@ -69,12 +75,16 @@ class AIStatsWorker:
 
         # Normalize token field names (prompt_tokens -> input_tokens, completion_tokens -> output_tokens)
         input_tokens = usage.get('prompt_tokens') or usage.get('input_tokens') or 0
+        cached_tokens = usage.get('cached_tokens') or 0
         output_tokens = usage.get('completion_tokens') or usage.get('output_tokens') or 0
 
         if not isinstance(input_tokens, int):
             input_tokens = 0
+        if not isinstance(cached_tokens, int):
+            cached_tokens = 0
         if not isinstance(output_tokens, int):
             output_tokens = 0
+        cached_tokens = min(max(cached_tokens, 0), max(input_tokens, 0))
 
         org_id = usage_info.get('org_id')
         scenario = usage_info.get('scenario')
@@ -108,6 +118,7 @@ class AIStatsWorker:
         key = (model, scenario)
         stats = self.ai_usage_stats[project_uuid][key]
         stats['input_tokens'] += input_tokens
+        stats['cached_tokens'] += cached_tokens
         stats['output_tokens'] += output_tokens
 
         if scenario == AIScenario.PORTAL_CHAT.value:
@@ -115,6 +126,7 @@ class AIStatsWorker:
             if isinstance(session_uuid, str) and session_uuid:
                 session_stats = self.portal_session_usage_stats[project_uuid][(session_uuid, model)]
                 session_stats['input_tokens'] += input_tokens
+                session_stats['cached_tokens'] += cached_tokens
                 session_stats['output_tokens'] += output_tokens
 
     def receive(self):
@@ -177,18 +189,20 @@ class AIStatsWorker:
         update_sql = '''
         UPDATE `ai_usage_statistics`
         SET `input_tokens`=`input_tokens`+:input_tokens,
+            `cached_tokens`=`cached_tokens`+:cached_tokens,
             `output_tokens`=`output_tokens`+:output_tokens,
             `cost`=`cost`+:cost,
             `updated_at`=:updated_at
         WHERE `id`=:id
         '''
         insert_sql = '''
-        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `owner`, `group_id`, `org_id`, `scenario`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
-        VALUES (:project_uuid, :date, :model, :owner, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
+        INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `owner`, `group_id`, `org_id`, `scenario`, `input_tokens`, `cached_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
+        VALUES (:project_uuid, :date, :model, :owner, :group_id, :org_id, :scenario, :input_tokens, :cached_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
         portal_session_update_sql = '''
         UPDATE `portal_chat_sessions`
         SET `input_tokens`=`input_tokens`+:input_tokens,
+            `cached_tokens`=`cached_tokens`+:cached_tokens,
             `output_tokens`=`output_tokens`+:output_tokens,
             `credit_used`=`credit_used`+:credit_used
         WHERE `session_uuid`=:session_uuid
@@ -201,10 +215,17 @@ class AIStatsWorker:
             workspace_owner = project_workspace_owner_cache.get(project_uuid)
             for (model, scenario), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
+                cached_tokens = usage.get('cached_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 input_tokens_price = AI_PRICES[model].get('input_tokens', 0)
+                cached_tokens_price = AI_PRICES[model].get('cached_tokens', input_tokens_price)
                 output_tokens_price = AI_PRICES[model].get('output_tokens', 0)
-                cost = input_tokens_price * (input_tokens / 1e6) + output_tokens_price * (output_tokens / 1e6)
+                uncached_input_tokens = input_tokens - cached_tokens
+                cost = (
+                    input_tokens_price * (uncached_input_tokens / 1e6) +
+                    cached_tokens_price * (cached_tokens / 1e6) +
+                    output_tokens_price * (output_tokens / 1e6)
+                )
 
                 owner = None
                 group_id = None
@@ -214,8 +235,8 @@ class AIStatsWorker:
                 else:
                     owner = workspace_owner
 
-                logger.debug('project %s model %s owner %s group_id %s scenario %s org_id %s, input_tokens %s, output_tokens %s, cost %s',
-                           project_uuid, model, owner, group_id, scenario, org_id, input_tokens, output_tokens, cost)
+                logger.debug('project %s model %s owner %s group_id %s scenario %s org_id %s, input_tokens %s, cached_tokens %s, output_tokens %s, cost %s',
+                           project_uuid, model, owner, group_id, scenario, org_id, input_tokens, cached_tokens, output_tokens, cost)
 
                 project_data.append({
                     'project_uuid': project_uuid,
@@ -226,6 +247,7 @@ class AIStatsWorker:
                     'org_id': org_id,
                     'scenario': scenario,
                     'input_tokens': input_tokens,
+                    'cached_tokens': cached_tokens,
                     'output_tokens': output_tokens,
                     'cost': cost,
                     'created_at': now,
@@ -235,13 +257,16 @@ class AIStatsWorker:
                     org_cost_delta[org_id] += cost
 
         for project_uuid, stats_dict in portal_session_stats.items():
-            session_data = defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0, 'credit_used': 0})
+            session_data = defaultdict(lambda: {'input_tokens': 0, 'cached_tokens': 0, 'output_tokens': 0, 'credit_used': 0})
             for (session_uuid, model), usage in stats_dict.items():
                 input_tokens = usage.get('input_tokens') or 0
+                cached_tokens = usage.get('cached_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
                 cost = AI_PRICES[model].get('input_tokens', 0) * (input_tokens / 1e6)
+                cost += AI_PRICES[model].get('cached_tokens', 0) * (cached_tokens / 1e6)
                 cost += AI_PRICES[model].get('output_tokens', 0) * (output_tokens / 1e6)
                 session_data[session_uuid]['input_tokens'] += input_tokens
+                session_data[session_uuid]['cached_tokens'] += cached_tokens
                 session_data[session_uuid]['output_tokens'] += output_tokens
                 session_data[session_uuid]['credit_used'] += cost * 100
             for session_uuid, usage in session_data.items():
@@ -269,6 +294,7 @@ class AIStatsWorker:
                     session.execute(text(update_sql), {
                         'id': result[0],
                         'input_tokens': data['input_tokens'],
+                        'cached_tokens': data['cached_tokens'],
                         'output_tokens': data['output_tokens'],
                         'cost': data['cost'],
                         'updated_at': data['updated_at']
