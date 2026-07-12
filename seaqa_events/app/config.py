@@ -78,6 +78,7 @@ def get_llm_price(models):
     - ...
       price:
         input_tokens: float # / (M Tokens)
+        cached_tokens: float # / (M Tokens), defaults to input_tokens
         output_tokens: float # / (M Tokens)
 
     Type B: for embeddings or other models
@@ -99,12 +100,14 @@ def get_llm_price(models):
         if isinstance(price, (float, int)):
             prices[model_name] = {
                 'input_tokens': price,
+                'cached_tokens': price,
                 'output_tokens': 0
             }
             continue
         if isinstance(price, dict) and 'input_tokens' in price:
             prices[model_name] = {
                 'input_tokens': price.get('input_tokens', 0),
+                'cached_tokens': price.get('cached_tokens', price.get('input_tokens', 0)),
                 'output_tokens': price.get('output_tokens', 0),
             }
     return prices
