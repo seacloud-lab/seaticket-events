@@ -21,3 +21,5 @@ class SchemaTables:
     NOTION = SCHEMA.NotionTable
     GENERAL_TASK = SCHEMA.GeneralTaskTable
     GENERAL_TASK_USER = SCHEMA.GeneralTaskUserTable
+    DISCORD_THREADS = SCHEMA.DiscordThreadsTable
+    DISCORD_THREAD_MESSAGES = SCHEMA.DiscordThreadMessagesTable

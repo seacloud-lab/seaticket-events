@@ -9,6 +9,7 @@ class ConnectionType(Enum):
     SITE = 'site'
     SEAFILE = 'seafile'
     NOTION = 'notion'
+    DISCORD = 'discord'
 
 class AIScenario(Enum):
     SUMMARY = 'summary'
@@ -30,5 +31,6 @@ KB_DISPLAY_ALL_COLUMNS = ['title', 'content', 'creator', 'created_time', 'last_m
 ISSUE_CONNECTION_TYPES = [
     ConnectionType.GITHUB_ISSUE.value,
     ConnectionType.DISCOURSE_FORUM.value,
+    ConnectionType.DISCORD.value,
     ConnectionType.EMAIL.value,
 ]
