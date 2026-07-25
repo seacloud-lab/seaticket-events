@@ -1058,7 +1058,9 @@ tables:
       name:
         column_type: text
       connection_id:
-        column_type: text
+        column_type: list
+        column_data:
+          list_type: int64
       record_modified_time:
         column_type: datetime
     indexes:

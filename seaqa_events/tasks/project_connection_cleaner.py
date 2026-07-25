@@ -10,6 +10,8 @@ from seaqa_events.utils import uuid_str_to_36_chars
 from seaqa_events.utils.indexer_api import cleanup_deleted_project, cleanup_deleted_connection
 from seaqa_events.utils.seadb_api import SeaDBAPI
 from seaqa_events.utils import get_connection_all_table_names
+from seaqa_events.utils.constant import CONNECTION_USER_CLEANUP_TYPES
+from seaqa_events.seadb_models.models import SchemaTables
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +129,8 @@ class CleanProjectConnectionsTimer(Thread):
         resp = cleanup_deleted_connection(project_uuid, connection_id, connection_type)
         if resp.get('success'):
             self.cleanup_deleted_connection_tables(project_uuid, connection_id, connection_type)
+            if connection_type in CONNECTION_USER_CLEANUP_TYPES:
+                self._cleanup_connection_users(project_uuid, connection_id)
             self._delete_deleted_connection(connection_id)
         else:
             logger.error('Fail to cleanup deleted connection %s, error: %s', connection_id, resp.get('error_msg'))
@@ -189,3 +193,45 @@ class CleanProjectConnectionsTimer(Thread):
             if table_name not in table_names:
                 continue
             seadb_api.delete_table(project_uuid, table.get('id'))
+
+    def _cleanup_connection_users(self, project_uuid, connection_id):
+        """Remove a deleted connection from all user records in connection_user.
+
+        Queries all rows whose connection_id list contains the given connection_id,
+        removes it from the list, and deletes the row entirely if the list becomes empty.
+        """
+        table_name = SchemaTables.CONNECTION_USER.table_name()
+        seadb_api = SeaDBAPI()
+        page_size = 1000
+        total_cleaned = 0
+
+        while True:
+            sql = f"SELECT _pk, connection_id FROM `{table_name}` WHERE {connection_id} IN connection_id LIMIT {page_size}"
+            result = seadb_api.query_rows(project_uuid, sql)
+            rows = result.get('results', [])
+            if not rows:
+                break
+
+            deletes = []
+            updates = []
+            for row in rows:
+                existing_ids = row.get('connection_id') or []
+                existing_ids.remove(connection_id)
+                if not existing_ids:
+                    deletes.append(row['_pk'])
+                else:
+                    updates.append({
+                        'pk': row['_pk'],
+                        'row': {'connection_id': existing_ids}
+                    })
+
+            if deletes:
+                seadb_api.delete_rows(project_uuid, table_name, deletes)
+            if updates:
+                seadb_api.update_rows(project_uuid, table_name, updates)
+
+            total_cleaned += len(rows)
+            if len(rows) < page_size:
+                break
+
+        logger.info('Cleaned %d connection_user rows for deleted connection %s', total_cleaned, connection_id)

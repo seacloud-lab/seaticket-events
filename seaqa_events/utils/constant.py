@@ -9,6 +9,8 @@ class ConnectionType(Enum):
     SITE = 'site'
     SEAFILE = 'seafile'
     NOTION = 'notion'
+    LINEAR = 'linear'
+    CONFLUENCE = 'confluence'
     DISCORD = 'discord'
 
 class AIScenario(Enum):
@@ -33,4 +35,12 @@ ISSUE_CONNECTION_TYPES = [
     ConnectionType.DISCOURSE_FORUM.value,
     ConnectionType.DISCORD.value,
     ConnectionType.EMAIL.value,
+]
+
+# Connection types that store user data in the shared connection_user table.
+# When a connection of these types is deleted, its id must be removed
+# from all user records in connection_user.
+CONNECTION_USER_CLEANUP_TYPES = [
+    ConnectionType.GENERAL_TASK.value,
+    ConnectionType.CONFLUENCE.value,
 ]
