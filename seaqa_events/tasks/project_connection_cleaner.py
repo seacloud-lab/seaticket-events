@@ -6,16 +6,19 @@ from threading import Thread, Event
 from sqlalchemy import text
 
 from seaqa_events.db import init_db_session_class
+from seaqa_events.app.event_redis import publish_project_storage_update, redis_cache
 from seaqa_events.utils import uuid_str_to_36_chars
 from seaqa_events.utils.indexer_api import cleanup_deleted_project, cleanup_deleted_connection
 from seaqa_events.utils.seadb_api import SeaDBAPI
 from seaqa_events.utils import get_connection_all_table_names
 from seaqa_events.utils.constant import CONNECTION_USER_CLEANUP_TYPES
 from seaqa_events.seadb_models.models import SchemaTables
+from seaqa_events.utils.constant import ConnectionType
 
 logger = logging.getLogger(__name__)
 
 TRASH_CLEANUP_DAYS = 30
+S3_CONNECTION_TYPES = {ConnectionType.SITE.value, ConnectionType.EMAIL.value}
 
 
 class ProjectConnectionCleaner(object):
@@ -115,6 +118,9 @@ class CleanProjectConnectionsTimer(Thread):
                 logger.info('Finish clean deleted connection %s', connection_id)
             except Exception as e:
                 logger.exception('Fail to clean deleted connection, project_uuid=%s, connection_id=%s, error=%s', project_uuid, connection_id, e)
+            finally:
+                if connection_type in S3_CONNECTION_TYPES:
+                    publish_project_storage_update(redis_cache, project_uuid)
 
     def _clear_deleted_project(self, project_uuid):
         resp = cleanup_deleted_project(project_uuid)
@@ -166,6 +172,7 @@ class CleanProjectConnectionsTimer(Thread):
             # delete project connection
             session.execute(text("""DELETE FROM project_connection WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             # delete deleted_projects record
+            session.execute(text("""DELETE FROM project_storage_statistics WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM deleted_projects WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM project_connection_oauth WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM project_github_app_installation WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
