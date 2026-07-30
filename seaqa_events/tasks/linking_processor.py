@@ -27,6 +27,9 @@ GITHUB_ISSUE_DISPLAY_FIELDS = ['title', 'state', 'labels', 'assignees', 'issue_t
 # Fields from a Discourse topic row worth surfacing in the activity log
 DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
 
+# Fields from a Discord thread row worth surfacing in the activity log
+DISCORD_THREAD_DISPLAY_FIELDS = ['title']
+
 # Fields from a general task row worth surfacing in the activity log
 GENERAL_TASK_DISPLAY_FIELDS = ['title', 'status', 'size', 'priority', 'assignees', 'version', 'due_date']
 
@@ -38,6 +41,7 @@ class LinkingProcessor:
     Currently handles:
     - GitHub issue changes → find the linked ticket → insert a ticket activity log.
     - Discourse topic changes → find the linked ticket → insert a ticket activity log.
+    - Discord thread changes → find the linked ticket → insert a ticket activity log.
     - Email thread changes → find the linked ticket → insert a ticket activity log.
     """
 
@@ -167,6 +171,15 @@ class LinkingWorker(Thread):
             except Exception as e:
                 logger.error('failed to handle discourse_topic event (project=%s record=%s): %s', project_uuid, record_id, e)
 
+        elif source_type == ConnectionType.DISCORD.value:
+            connection_id = data.get('connection_id')
+            if connection_id is None:
+                return
+            try:
+                self._handle_discord_thread_event(project_uuid, record_id, connection_id, event)
+            except Exception as e:
+                logger.error('failed to handle discord_thread event (project=%s record=%s): %s', project_uuid, record_id, e)
+
         elif source_type == ConnectionType.EMAIL.value:
             connection_id = data.get('connection_id')
             if connection_id is None:
@@ -282,6 +295,45 @@ class LinkingWorker(Thread):
             return
         logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
 
+    def _handle_discord_thread_event(self, project_uuid, record_id, connection_id, event):
+        threads_table = SchemaTables.DISCORD_THREADS.table_name(connection_id)
+        select_fields = '`linked_ticket`, `thread_id`, `title`'
+        context = self._load_linked_record_event_context(project_uuid, record_id, threads_table, select_fields, event)
+        if not context:
+            return
+
+        record_id, row_data, linked_ticket, event_type, old_all, new_all = context
+
+        thread_url = ''
+        try:
+            connection = self.seaqa_db.get_project_connection_by_id(connection_id)
+            if connection:
+                config = json.loads(connection.config) if connection.config else {}
+                guild_id = config.get('guild_id', '')
+                channel_id = config.get('channel_id', '')
+                thread_id = row_data.get('thread_id', '')
+                if guild_id and channel_id and thread_id:
+                    thread_url = (
+                        f'https://discord.com/channels/{guild_id}/{channel_id}'
+                        f'/threads/{thread_id}'
+                    )
+        except Exception as e:
+            logger.warning('failed to build Discord thread URL for connection_id=%s: %s', connection_id, e)
+
+        base_detail = {
+            'connection_id': connection_id,
+            'record_id': record_id,
+            'thread_id': row_data.get('thread_id'),
+            'thread_title': row_data.get('title', ''),
+            'thread_url': thread_url,
+        }
+        inserted = self._insert_ticket_activity_rows(
+            project_uuid, linked_ticket, event_type, old_all, new_all, base_detail
+        )
+        if not inserted:
+            return
+        logger.info('inserted %d activity rows for "%s" on ticket %s', inserted, event_type, linked_ticket)
+
     def _handle_email_thread_event(self, project_uuid, record_id, connection_id, event):
         threads_table = SchemaTables.THREAD.table_name(connection_id)
         select_fields = '`linked_ticket`, `_pk`, `title`'
@@ -368,7 +420,12 @@ class LinkingWorker(Thread):
                 rows.append(_make_row(old_state or None, new_state or None))
             return rows
 
-        if event_type in ('github_issue_updated', 'discourse_topic_updated', 'general_task_updated'):
+        if event_type in (
+            'github_issue_updated',
+            'discourse_topic_updated',
+            'discord_thread_updated',
+            'general_task_updated',
+        ):
             # one row per changed field
             old_obj = old_all or {}
             new_obj = new_all or {}
@@ -410,6 +467,13 @@ class LinkingWorker(Thread):
                 'author': new_raw.get('author'),
             }
 
+        # discord
+        if event_type == 'discord_thread_message_added':
+            return None, {
+                'count': 1,
+                'author': new_raw.get('author'),
+            }
+
         # email
         if event_type == 'email_message_added':
             return None, {'count': 1}
@@ -418,6 +482,8 @@ class LinkingWorker(Thread):
             display_fields = GITHUB_ISSUE_DISPLAY_FIELDS
         elif event_type.startswith('discourse_topic_'):
             display_fields = DISCOURSE_TOPIC_DISPLAY_FIELDS
+        elif event_type.startswith('discord_thread_'):
+            display_fields = DISCORD_THREAD_DISPLAY_FIELDS
         elif event_type.startswith('general_task_'):
             display_fields = GENERAL_TASK_DISPLAY_FIELDS
         else:
