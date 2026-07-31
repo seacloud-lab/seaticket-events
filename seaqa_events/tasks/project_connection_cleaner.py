@@ -130,7 +130,7 @@ class CleanProjectConnectionsTimer(Thread):
         if resp.get('success'):
             self.cleanup_deleted_connection_tables(project_uuid, connection_id, connection_type)
             if connection_type in CONNECTION_USER_CLEANUP_TYPES:
-                self._cleanup_connection_users(project_uuid, connection_id)
+                self._cleanup_connection_users(project_uuid, connection_id, connection_type)
             self._delete_deleted_connection(connection_id)
         else:
             logger.error('Fail to cleanup deleted connection %s, error: %s', connection_id, resp.get('error_msg'))
@@ -194,7 +194,7 @@ class CleanProjectConnectionsTimer(Thread):
                 continue
             seadb_api.delete_table(project_uuid, table.get('id'))
 
-    def _cleanup_connection_users(self, project_uuid, connection_id):
+    def _cleanup_connection_users(self, project_uuid, connection_id, connection_type):
         """Remove a deleted connection from all user records in connection_user.
 
         Queries all rows whose connection_id list contains the given connection_id,
@@ -206,7 +206,7 @@ class CleanProjectConnectionsTimer(Thread):
         total_cleaned = 0
 
         while True:
-            sql = f"SELECT _pk, connection_id FROM `{table_name}` WHERE {connection_id} IN connection_id LIMIT {page_size}"
+            sql = f"SELECT _pk, connection_ids FROM `{table_name}` WHERE {connection_id} IN connection_ids AND connection_type='{connection_type}' LIMIT {page_size}"
             result = seadb_api.query_rows(project_uuid, sql)
             rows = result.get('results', [])
             if not rows:
@@ -215,14 +215,14 @@ class CleanProjectConnectionsTimer(Thread):
             deletes = []
             updates = []
             for row in rows:
-                existing_ids = row.get('connection_id') or []
+                existing_ids = row.get('connection_ids') or []
                 existing_ids.remove(connection_id)
                 if not existing_ids:
                     deletes.append(row['_pk'])
                 else:
                     updates.append({
                         'pk': row['_pk'],
-                        'row': {'connection_id': existing_ids}
+                        'row': {'connection_ids': existing_ids}
                     })
 
             if deletes:
