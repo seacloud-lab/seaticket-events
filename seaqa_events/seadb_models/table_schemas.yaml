@@ -363,6 +363,8 @@ tables:
         column_type: bool
       due_date:
         column_type: datetime
+        column_data:
+          format: YYYY-MM-DD
       last_agent_processed_at:
         column_type: datetime
     indexes:
@@ -830,6 +832,8 @@ tables:
           compressed: true
       due_date:
         column_type: datetime
+        column_data:
+          format: YYYY-MM-DD
       modified_time:
         column_type: datetime
       created_time:
@@ -887,6 +891,8 @@ tables:
         column_type: text
       due_date:
         column_type: datetime
+        column_data:
+          format: YYYY-MM-DD
       sync_time:
         column_type: datetime
       created_time:
@@ -1061,10 +1067,10 @@ tables:
         column_type: list
         column_data:
           list_type: int64
-      record_modified_time:
-        column_type: datetime
       connection_type:
         column_type: text
+      record_modified_time:
+        column_type: datetime
       next_privacy_report_at:
         column_type: datetime
     indexes:
