@@ -212,23 +212,23 @@ class CleanProjectConnectionsTimer(Thread):
             if not rows:
                 break
 
-            deletes = []
-            updates = []
+            delete_users = []
+            update_users = []
             for row in rows:
                 existing_ids = row.get('connection_ids') or []
                 existing_ids.remove(connection_id)
                 if not existing_ids:
-                    deletes.append(row['_pk'])
+                    delete_users.append(row['_pk'])
                 else:
-                    updates.append({
+                    update_users.append({
                         'pk': row['_pk'],
                         'row': {'connection_ids': existing_ids}
                     })
 
-            if deletes:
-                seadb_api.delete_rows(project_uuid, table_name, deletes)
-            if updates:
-                seadb_api.update_rows(project_uuid, table_name, updates)
+            if delete_users:
+                seadb_api.delete_rows(project_uuid, table_name, delete_users)
+            if update_users:
+                seadb_api.update_rows(project_uuid, table_name, update_users)
 
             total_cleaned += len(rows)
             if len(rows) < page_size:
