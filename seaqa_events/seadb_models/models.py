@@ -20,6 +20,9 @@ class SchemaTables:
     AGENT_ACTIONS = SCHEMA.AgentActionsTable
     NOTION = SCHEMA.NotionTable
     GENERAL_TASK = SCHEMA.GeneralTaskTable
-    GENERAL_TASK_USER = SCHEMA.GeneralTaskUserTable
+    CONNECTION_USER = SCHEMA.ConnectionUserTable
+    LINEAR_ISSUES = SCHEMA.LinearIssuesTable
+    LINEAR_ISSUE_COMMENTS = SCHEMA.LinearIssueCommentsTable
     DISCORD_THREADS = SCHEMA.DiscordThreadsTable
     DISCORD_THREAD_MESSAGES = SCHEMA.DiscordThreadMessagesTable
+    CONFLUENCE = SCHEMA.ConfluenceTable
