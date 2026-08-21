@@ -167,10 +167,8 @@ class CleanProjectConnectionsTimer(Thread):
             session.execute(text("""DELETE FROM project_connection WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             # delete deleted_projects record
             session.execute(text("""DELETE FROM deleted_projects WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
-            session.execute(text("""DELETE FROM project_linear_oauth WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
+            session.execute(text("""DELETE FROM project_connection_oauth WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.execute(text("""DELETE FROM project_github_app_installation WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid_36})
-            session.execute(text("""DELETE FROM project_confluence_oauth WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
-            session.execute(text("""DELETE FROM project_jira_oauth WHERE project_uuid=:project_uuid"""), {'project_uuid': project_uuid})
             session.commit()
 
     def _delete_deleted_connection(self, connection_id):
