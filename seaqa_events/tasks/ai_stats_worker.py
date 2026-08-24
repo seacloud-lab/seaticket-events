@@ -38,6 +38,9 @@ class AIStatsWorker:
 
     def reset_stats(self):
         self.ai_usage_stats = defaultdict(lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0}))
+        self.portal_session_usage_stats = defaultdict(
+            lambda: defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0})
+        )
         # { project_uuid: org_id } - cache to avoid repeated database queries
         self.project_org_cache = {}
         self.project_workspace_owner_cache = {}
@@ -108,6 +111,13 @@ class AIStatsWorker:
         stats['input_tokens'] += input_tokens
         stats['output_tokens'] += output_tokens
 
+        if scenario == AIScenario.PORTAL_CHAT.value:
+            session_uuid = usage_info.get('session_uuid')
+            if isinstance(session_uuid, str) and session_uuid:
+                session_stats = self.portal_session_usage_stats[project_uuid][(session_uuid, model)]
+                session_stats['input_tokens'] += input_tokens
+                session_stats['output_tokens'] += output_tokens
+
     def receive(self):
         logger.info('Starts to receive ai calls...')
         subscriber = self._redis_client.get_subscriber(self.channel)
@@ -146,6 +156,7 @@ class AIStatsWorker:
         # Create atomic snapshot and reset
         with self.stats_lock:
             project_stats = deepcopy(self.ai_usage_stats)
+            portal_session_stats = deepcopy(self.portal_session_usage_stats)
             project_org_cache = deepcopy(self.project_org_cache)
             project_workspace_owner_cache = deepcopy(self.project_workspace_owner_cache)
             self.reset_stats()
@@ -174,7 +185,15 @@ class AIStatsWorker:
         INSERT INTO `ai_usage_statistics`(`project_uuid`, `date`, `model`, `owner`, `group_id`, `org_id`, `scenario`, `input_tokens`, `output_tokens`, `cost`, `created_at`, `updated_at`)
         VALUES (:project_uuid, :date, :model, :owner, :group_id, :org_id, :scenario, :input_tokens, :output_tokens, :cost, :created_at, :updated_at)
         '''
+        portal_session_update_sql = '''
+        UPDATE `portal_chat_sessions`
+        SET `input_tokens`=`input_tokens`+:input_tokens,
+            `output_tokens`=`output_tokens`+:output_tokens,
+            `credit_used`=`credit_used`+:credit_used
+        WHERE `session_uuid`=:session_uuid
+        '''
         project_data = []
+        portal_session_data = []
         org_cost_delta = defaultdict(float)
         for project_uuid, stats_dict in project_stats.items():
             org_id = project_org_cache.get(project_uuid)
@@ -214,6 +233,22 @@ class AIStatsWorker:
                 if org_id is not None:
                     org_cost_delta[org_id] += cost
 
+        for project_uuid, stats_dict in portal_session_stats.items():
+            session_data = defaultdict(lambda: {'input_tokens': 0, 'output_tokens': 0, 'credit_used': 0})
+            for (session_uuid, model), usage in stats_dict.items():
+                input_tokens = usage.get('input_tokens') or 0
+                output_tokens = usage.get('output_tokens') or 0
+                cost = AI_PRICES[model].get('input_tokens', 0) * (input_tokens / 1e6)
+                cost += AI_PRICES[model].get('output_tokens', 0) * (output_tokens / 1e6)
+                session_data[session_uuid]['input_tokens'] += input_tokens
+                session_data[session_uuid]['output_tokens'] += output_tokens
+                session_data[session_uuid]['credit_used'] += cost * 100
+            for session_uuid, usage in session_data.items():
+                portal_session_data.append({
+                    'session_uuid': session_uuid,
+                    **usage,
+                })
+
         # Execute database operations
         session = self._db_session_class()
         try:
@@ -239,6 +274,9 @@ class AIStatsWorker:
                     })
                 else:
                     session.execute(text(insert_sql), data)
+
+            for data in portal_session_data:
+                session.execute(text(portal_session_update_sql), data)
 
             session.commit()
         except Exception as e:
