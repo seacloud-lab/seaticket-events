@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_UINT64 = 2 ** 64 - 1
 PROJECT_STORAGE_UPDATE_CHANNEL = 'project_storage_update'
 PROJECT_STORAGE_BATCH_SIZE = 50
-REDIS_RECONNECT_INTERVAL = 1
+RECONNECT_SLEEP = 1
 NO_MSG_TIMEOUT = 24 * 60 * 60
 
 
@@ -63,7 +63,7 @@ class StorageUsageTimer(threading.Thread):
         self._interval = interval
         self._db_session_class = db_session_class
         self._redis_client = RedisClient(configs, socket_timeout=10)
-        self._pending_projects = {}
+        self._pending_projects = set()
         self._pending_lock = threading.Lock()
         self.finished = threading.Event()
 
@@ -75,14 +75,14 @@ class StorageUsageTimer(threading.Thread):
             if not self.finished.is_set():
                 try:
                     self._update_pending_projects()
-                except Exception:
-                    logger.exception('Project storage usage collection failed')
+                except Exception as e:
+                    logger.exception('Project storage usage collection failed, error: %s', e)
 
     def _update_pending_projects(self):
         started_at = time.monotonic()
         with self._pending_lock:
-            project_uuids = list(self._pending_projects)
-            self._pending_projects = {}
+            project_uuids = self._pending_projects
+            self._pending_projects = set()
         if not project_uuids:
             logger.info('No projects need storage usage update')
             return
@@ -105,19 +105,7 @@ class StorageUsageTimer(threading.Thread):
                 batch_project_uuids = [stat['project_uuid'] for stat in batch]
                 try:
                     with self._db_session_class() as session:
-                        active_projects = session.execute(
-                            text(
-                                'SELECT p.uuid AS project_uuid, w.org_id '
-                                'FROM projects p '
-                                'JOIN workspaces w ON w.id=p.workspace_id '
-                                'WHERE p.uuid IN :project_uuids'
-                            ).bindparams(bindparam('project_uuids', expanding=True)),
-                            {'project_uuids': batch_project_uuids},
-                        ).all()
-                        project_org_map = {
-                            row.project_uuid: row.org_id
-                            for row in active_projects
-                        }
+                        project_org_map = self._get_project_org_map(session, batch_project_uuids)
                         calculated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         rows = [
                             {
@@ -129,43 +117,60 @@ class StorageUsageTimer(threading.Thread):
                             if stat['project_uuid'] in project_org_map
                         ]
                         if rows:
-                            session.execute(text(
-                                """INSERT INTO project_storage_statistics
-                                   (project_uuid, org_id, file_size, crawl_data_size,
-                                    total_size, calculated_at)
-                                   VALUES (:project_uuid, :org_id, :file_size,
-                                           :crawl_data_size, :total_size, :calculated_at)
-                                   ON DUPLICATE KEY UPDATE
-                                    org_id=VALUES(org_id),
-                                    file_size=VALUES(file_size),
-                                    crawl_data_size=VALUES(crawl_data_size),
-                                    total_size=VALUES(total_size),
-                                    calculated_at=VALUES(calculated_at)"""
-                            ), rows)
+                            self._save_storage_statistics(session, rows)
                         session.commit()
-                except Exception:
-                    logger.exception('Failed to persist storage usage for projects %s', batch_project_uuids)
+                except Exception as e:
+                    logger.exception('Failed to persist storage usage for projects %s, error: %s', batch_project_uuids, e)
                     retry_projects.extend(batch_project_uuids)
                 del storage_statistics[:len(batch)]
         finally:
             pending_projects = retry_projects + [stat['project_uuid'] for stat in storage_statistics] + list(projects_to_collect)
             if pending_projects:
                 with self._pending_lock:
-                    for project_uuid in pending_projects:
-                        self._pending_projects.setdefault(project_uuid, None)
+                    self._pending_projects.update(pending_projects)
 
         logger.info(
             'Project storage usage collection finished: attempted=%s failed=%s elapsed=%.3fs',
             len(project_uuids), len(retry_projects), time.monotonic() - started_at,
         )
 
+    def _get_project_org_map(self, session, project_uuids):
+        active_projects = session.execute(
+            text(
+                'SELECT p.uuid AS project_uuid, w.org_id '
+                'FROM projects p '
+                'JOIN workspaces w ON w.id=p.workspace_id '
+                'WHERE p.uuid IN :project_uuids'
+            ).bindparams(bindparam('project_uuids', expanding=True)),
+            {'project_uuids': project_uuids},
+        ).all()
+        return {
+            row.project_uuid: row.org_id
+            for row in active_projects
+        }
+
+    def _save_storage_statistics(self, session, rows):
+        session.execute(text(
+            """INSERT INTO project_storage_statistics
+               (project_uuid, org_id, file_size, crawl_data_size,
+                total_size, calculated_at)
+               VALUES (:project_uuid, :org_id, :file_size,
+                       :crawl_data_size, :total_size, :calculated_at)
+               ON DUPLICATE KEY UPDATE
+                org_id=VALUES(org_id),
+                file_size=VALUES(file_size),
+                crawl_data_size=VALUES(crawl_data_size),
+                total_size=VALUES(total_size),
+                calculated_at=VALUES(calculated_at)"""
+        ), rows)
+
     def _collect_project(self, project_uuid):
         try:
             response = get_project_storage_usage(project_uuid)
             if not response.get('success'):
                 raise ValueError('Invalid Indexer storage usage response')
-        except Exception:
-            logger.exception('Failed to collect Indexer storage usage for project %s', project_uuid)
+        except Exception as e:
+            logger.exception('Failed to collect Indexer storage usage for project %s, error: %s', project_uuid, e)
             return None
 
         try:
@@ -179,8 +184,8 @@ class StorageUsageTimer(threading.Thread):
                 'crawl_data_size': crawl_size,
                 'total_size': total_size,
             }
-        except Exception:
-            logger.exception('Failed to collect storage usage for project %s', project_uuid)
+        except Exception as e:
+            logger.exception('Failed to collect storage usage for project %s, error: %s', project_uuid, e)
             return None
 
     def _listen_project_updates(self):
@@ -195,7 +200,7 @@ class StorageUsageTimer(threading.Thread):
                 if not message:
                     if time.monotonic() - last_message_at > NO_MSG_TIMEOUT:
                         raise NoMessageException('No message received for %s seconds' % NO_MSG_TIMEOUT)
-                    self.finished.wait(REDIS_RECONNECT_INTERVAL)
+                    self.finished.wait(RECONNECT_SLEEP)
                     continue
                 last_message_at = time.monotonic()
                 try:
@@ -209,18 +214,18 @@ class StorageUsageTimer(threading.Thread):
                 try:
                     normalized_uuid = uuid_str_to_32_chars(project_uuid)
                     with self._pending_lock:
-                        self._pending_projects.setdefault(normalized_uuid, None)
+                        self._pending_projects.add(normalized_uuid)
                 except Exception as e:
                     logger.warning('Ignore project storage update with invalid project_uuid: %s', e)
             except Exception as e:
-                logger.warning('Project storage update subscriber failed: %s', e)
+                logger.exception('Project storage update subscriber failed, error: %s', e)
                 if subscriber is not None:
                     try:
                         subscriber.close()
                     except Exception:
                         pass
                     subscriber = None
-                self.finished.wait(REDIS_RECONNECT_INTERVAL)
+                self.finished.wait(RECONNECT_SLEEP)
 
     def cancel(self):
         self.finished.set()

@@ -114,13 +114,13 @@ class CleanProjectConnectionsTimer(Thread):
 
             logger.info('Start clean deleted connection %s (type=%s)', connection_id, connection_type)
             try:
-                self._clear_deleted_connection(project_uuid, connection_id, connection_type)
-                logger.info('Finish clean deleted connection %s', connection_id)
+                cleaned = self._clear_deleted_connection(project_uuid, connection_id, connection_type)
+                if cleaned:
+                    logger.info('Finish clean deleted connection %s', connection_id)
+                    if connection_type in S3_CONNECTION_TYPES:
+                        publish_project_storage_update(redis_cache, project_uuid)
             except Exception as e:
                 logger.exception('Fail to clean deleted connection, project_uuid=%s, connection_id=%s, error=%s', project_uuid, connection_id, e)
-            finally:
-                if connection_type in S3_CONNECTION_TYPES:
-                    publish_project_storage_update(redis_cache, project_uuid)
 
     def _clear_deleted_project(self, project_uuid):
         resp = cleanup_deleted_project(project_uuid)
@@ -138,8 +138,10 @@ class CleanProjectConnectionsTimer(Thread):
             if connection_type in CONNECTION_USER_CLEANUP_TYPES:
                 self._cleanup_connection_users(project_uuid, connection_id, connection_type)
             self._delete_deleted_connection(connection_id)
+            return True
         else:
             logger.error('Fail to cleanup deleted connection %s, error: %s', connection_id, resp.get('error_msg'))
+            return False
 
     def _get_all_deleted_connections(self):
         with self._db_session_class() as session:
