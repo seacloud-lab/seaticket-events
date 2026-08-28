@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 MAX_UINT64 = 2 ** 64 - 1
 PROJECT_STORAGE_UPDATE_CHANNEL = 'project_storage_update'
 PROJECT_STORAGE_BATCH_SIZE = 50
-RECONNECT_SLEEP = 1
+NO_MESSAGE_SLEEP = 1
 NO_MSG_TIMEOUT = 24 * 60 * 60
 
 
@@ -90,11 +90,13 @@ class StorageUsageTimer(threading.Thread):
         storage_statistics = []
         try:
             for project_uuid in project_uuids:
-                result = self._collect_project(project_uuid)
-                if result is None:
+                try:
+                    result = self._collect_project(project_uuid)
+                except Exception as e:
+                    logger.exception('Failed to collect storage usage for project %s, error: %s', project_uuid, e)
                     retry_projects.append(project_uuid)
-                else:
-                    storage_statistics.append({'project_uuid': project_uuid, **result})
+                    continue
+                storage_statistics.append({'project_uuid': project_uuid, **result})
 
             while storage_statistics:
                 batch = storage_statistics[:PROJECT_STORAGE_BATCH_SIZE]
@@ -160,24 +162,17 @@ class StorageUsageTimer(threading.Thread):
         ), rows)
 
     def _collect_project(self, project_uuid):
-        try:
-            response = get_project_storage_usage(project_uuid)
-            if not response.get('success'):
-                raise ValueError('Invalid Indexer storage usage response')
-        except Exception as e:
-            logger.exception('Failed to collect Indexer storage usage for project %s, error: %s', project_uuid, e)
-            return None
+        response = get_project_storage_usage(project_uuid)
+        if not response.get('success'):
+            error_msg = response.get('error_msg') or response
+            raise ValueError('Indexer storage usage failed: %s' % error_msg)
 
-        try:
-            file_size = _validate_size(response['usage']['file_size'], 'file_size')
-            crawl_size = _validate_size(response['usage']['crawl_data_size'], 'crawl_data_size')
-            return {
-                'file_size': file_size,
-                'crawl_data_size': crawl_size,
-            }
-        except Exception as e:
-            logger.exception('Failed to collect storage usage for project %s, error: %s', project_uuid, e)
-            return None
+        file_size = _validate_size(response['usage']['file_size'], 'file_size')
+        crawl_size = _validate_size(response['usage']['crawl_data_size'], 'crawl_data_size')
+        return {
+            'file_size': file_size,
+            'crawl_data_size': crawl_size,
+        }
 
     def _listen_project_updates(self):
         subscriber = None
@@ -191,7 +186,7 @@ class StorageUsageTimer(threading.Thread):
                 if not message:
                     if time.monotonic() - last_message_at > NO_MSG_TIMEOUT:
                         raise NoMessageException('No message received for %s seconds' % NO_MSG_TIMEOUT)
-                    self.finished.wait(RECONNECT_SLEEP)
+                    self.finished.wait(NO_MESSAGE_SLEEP)
                     continue
                 last_message_at = time.monotonic()
                 try:
@@ -220,7 +215,7 @@ class StorageUsageTimer(threading.Thread):
                 except Exception:
                     pass
                 subscriber = None
-            self.finished.wait(RECONNECT_SLEEP)
+            self.finished.wait(NO_MESSAGE_SLEEP)
 
     def cancel(self):
         self.finished.set()
