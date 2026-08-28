@@ -3,7 +3,6 @@ import json
 import logging
 import threading
 import time
-from collections import deque
 from datetime import datetime, timezone
 
 from sqlalchemy import bindparam, text
@@ -89,16 +88,13 @@ class StorageUsageTimer(threading.Thread):
 
         retry_projects = []
         storage_statistics = []
-        projects_to_collect = deque(project_uuids)
         try:
-            while projects_to_collect:
-                project_uuid = projects_to_collect[0]
+            for project_uuid in project_uuids:
                 result = self._collect_project(project_uuid)
                 if result is None:
                     retry_projects.append(project_uuid)
                 else:
                     storage_statistics.append({'project_uuid': project_uuid, **result})
-                projects_to_collect.popleft()
 
             while storage_statistics:
                 batch = storage_statistics[:PROJECT_STORAGE_BATCH_SIZE]
@@ -124,7 +120,7 @@ class StorageUsageTimer(threading.Thread):
                     retry_projects.extend(batch_project_uuids)
                 del storage_statistics[:len(batch)]
         finally:
-            pending_projects = retry_projects + [stat['project_uuid'] for stat in storage_statistics] + list(projects_to_collect)
+            pending_projects = retry_projects + [stat['project_uuid'] for stat in storage_statistics]
             if pending_projects:
                 with self._pending_lock:
                     self._pending_projects.update(pending_projects)
@@ -153,14 +149,13 @@ class StorageUsageTimer(threading.Thread):
         session.execute(text(
             """INSERT INTO project_storage_statistics
                (project_uuid, org_id, file_size, crawl_data_size,
-                total_size, calculated_at)
+                calculated_at)
                VALUES (:project_uuid, :org_id, :file_size,
-                       :crawl_data_size, :total_size, :calculated_at)
+                       :crawl_data_size, :calculated_at)
                ON DUPLICATE KEY UPDATE
                 org_id=VALUES(org_id),
                 file_size=VALUES(file_size),
                 crawl_data_size=VALUES(crawl_data_size),
-                total_size=VALUES(total_size),
                 calculated_at=VALUES(calculated_at)"""
         ), rows)
 
@@ -176,13 +171,9 @@ class StorageUsageTimer(threading.Thread):
         try:
             file_size = _validate_size(response['usage']['file_size'], 'file_size')
             crawl_size = _validate_size(response['usage']['crawl_data_size'], 'crawl_data_size')
-            total_size = file_size + crawl_size
-            if total_size > MAX_UINT64:
-                raise ValueError('total_size is out of range')
             return {
                 'file_size': file_size,
                 'crawl_data_size': crawl_size,
-                'total_size': total_size,
             }
         except Exception as e:
             logger.exception('Failed to collect storage usage for project %s, error: %s', project_uuid, e)
