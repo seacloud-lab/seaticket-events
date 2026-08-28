@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 MAX_UINT64 = 2 ** 64 - 1
 PROJECT_STORAGE_UPDATE_CHANNEL = 'project_storage_update'
 PROJECT_STORAGE_BATCH_SIZE = 50
+DEFAULT_INTERVAL = 24 * 60 * 60
 NO_MESSAGE_SLEEP = 1
 NO_MSG_TIMEOUT = 24 * 60 * 60
 
@@ -37,21 +38,9 @@ class ProjectStorageUsageCollector:
     def __init__(self, configs):
         self._configs = configs
         self._db_session_class = init_db_session_class(configs)
-        self._enabled = True
-        self._interval = 24 * 60 * 60
-        self._parse_config(configs)
-
-    def _parse_config(self, configs):
-        collector_config = configs.get('PROJECT_STORAGE_USAGE_COLLECTOR', {})
-        self._enabled = collector_config.get('enabled', True)
-        self._interval = collector_config.get('interval', self._interval)
-        if isinstance(self._interval, bool) or not isinstance(self._interval, int) or self._interval <= 0:
-            raise ValueError('PROJECT_STORAGE_USAGE_COLLECTOR.interval must be a positive integer')
+        self._interval = DEFAULT_INTERVAL
 
     def start(self):
-        if not self._enabled:
-            logger.warning('Project storage usage collector is disabled')
-            return
         logger.info('Start project storage usage collector, interval=%s sec', self._interval)
         StorageUsageTimer(self._interval, self._db_session_class, self._configs).start()
 
