@@ -198,7 +198,7 @@ class StorageUsageTimer(threading.Thread):
                     payload = json.loads(message.get('data'))
                     project_uuid = payload.get('project_uuid')
                 except Exception as e:
-                    logger.warning('Ignore invalid project storage update message: %s', e)
+                    logger.error('Ignore invalid project storage update message: %s', e)
                     continue
                 if not project_uuid:
                     continue
@@ -207,16 +207,20 @@ class StorageUsageTimer(threading.Thread):
                     with self._pending_lock:
                         self._pending_projects.add(normalized_uuid)
                 except Exception as e:
-                    logger.warning('Ignore project storage update with invalid project_uuid: %s', e)
+                    logger.error('Ignore project storage update with invalid project_uuid: %s', e)
+            except NoMessageException as e:
+                logger.warning('Project storage update subscriber has no message, error: %s', e)
             except Exception as e:
-                logger.exception('Project storage update subscriber failed, error: %s', e)
-                if subscriber is not None:
-                    try:
-                        subscriber.close()
-                    except Exception:
-                        pass
-                    subscriber = None
-                self.finished.wait(RECONNECT_SLEEP)
+                logger.error('Project storage update subscriber failed, error: %s', e, exc_info=True)
+            else:
+                continue
+            if subscriber is not None:
+                try:
+                    subscriber.close()
+                except Exception:
+                    pass
+                subscriber = None
+            self.finished.wait(RECONNECT_SLEEP)
 
     def cancel(self):
         self.finished.set()
