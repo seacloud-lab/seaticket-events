@@ -26,3 +26,4 @@ class SchemaTables:
     DISCORD_THREADS = SCHEMA.DiscordThreadsTable
     DISCORD_THREAD_MESSAGES = SCHEMA.DiscordThreadMessagesTable
     CONFLUENCE = SCHEMA.ConfluenceTable
+    FIREBASE_CRASH_ISSUES = SCHEMA.FirebaseCrashIssuesTable
