@@ -7,6 +7,7 @@ from seaqa_events.tasks.agent_run_logs_cleaner import AgentRunLogsCleaner
 from seaqa_events.tasks.email_notice_sender import EmailNoticesSender
 from seaqa_events.tasks.notification_cleaner import NotificationCleaner
 from seaqa_events.tasks.project_connection_cleaner import ProjectConnectionCleaner
+from seaqa_events.tasks.project_storage_usage import ProjectStorageUsageCollector
 from seaqa_events.tasks.issues_counter import IssuesCounter
 from seaqa_events.tasks.linking_processor import LinkingProcessor
 
@@ -28,6 +29,8 @@ class App(object):
         # project/connection cleaner
         self.project_connection_cleaner = ProjectConnectionCleaner(configs)
 
+        self.project_storage_usage_collector = ProjectStorageUsageCollector(configs)
+
         # agent run logs cleaner
         self.agent_run_logs_cleaner = AgentRunLogsCleaner(configs)
 
@@ -46,6 +49,8 @@ class App(object):
         self.notification_cleaner.start()
 
         self.project_connection_cleaner.start()
+
+        self.project_storage_usage_collector.start()
 
         self.agent_run_logs_cleaner.start()
 

@@ -5,9 +5,19 @@ import logging
 import time
 import redis
 
+from seaqa_events.utils import uuid_str_to_32_chars
+
 logger = logging.getLogger(__name__)
 
 REDIS_METRIC_KEY = 'metric'
+PROJECT_STORAGE_UPDATE_CHANNEL = 'project_storage_update'
+
+
+def publish_project_storage_update(redis_client, project_uuid):
+    try:
+        redis_client.publish(PROJECT_STORAGE_UPDATE_CHANNEL, json.dumps({'project_uuid': uuid_str_to_32_chars(project_uuid)}))
+    except Exception as e:
+        logger.warning('Failed to publish project storage update for project %s: %s', project_uuid, e)
 
 
 class RedisClient(object):
