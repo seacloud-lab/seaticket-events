@@ -656,6 +656,8 @@ tables:
         column_type: int64
       linked_ticket:
         column_type: int64
+      customer_id:
+        column_type: int64
       comment_count:
         column_type: int64
       created_time:
@@ -672,6 +674,7 @@ tables:
     - - substate
     - - type
     - - creator
+    - - customer_id
     - - deleted
     - - ai_processed_time
     - - modified_time
