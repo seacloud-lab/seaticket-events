@@ -26,3 +26,5 @@ class SchemaTables:
     DISCORD_THREADS = SCHEMA.DiscordThreadsTable
     DISCORD_THREAD_MESSAGES = SCHEMA.DiscordThreadMessagesTable
     CONFLUENCE = SCHEMA.ConfluenceTable
+    SLACK_MESSAGES = SCHEMA.SlackMessagesTable
+    SLACK_MESSAGE_REPLIES = SCHEMA.SlackMessageRepliesTable
