@@ -184,6 +184,9 @@ class CleanProjectConnectionsTimer(Thread):
         with self._db_session_class() as session:
             sql = """DELETE FROM project_connection WHERE id=:connection_id"""
             session.execute(text(sql), {'connection_id': connection_id})
+            delete_connection_oauth_sql = """DELETE FROM project_connection_oauth WHERE connection_id=:connection_id"""
+            session.execute(text(delete_connection_oauth_sql), {'connection_id': connection_id})
+
             session.commit()
 
     def cleanup_deleted_connection_tables(self, project_uuid, connection_id, connection_type):
