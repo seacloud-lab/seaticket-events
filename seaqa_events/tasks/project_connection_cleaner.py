@@ -18,7 +18,7 @@ from seaqa_events.utils.constant import ConnectionType
 logger = logging.getLogger(__name__)
 
 TRASH_CLEANUP_DAYS = 30
-S3_CONNECTION_TYPES = {ConnectionType.SITE.value, ConnectionType.EMAIL.value}
+S3_CONNECTION_TYPES = {ConnectionType.EMAIL.value}
 
 
 class ProjectConnectionCleaner(object):
