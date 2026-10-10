@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+from datetime import datetime, timezone
 from threading import Thread, Event
 
 from sqlalchemy import text
@@ -14,6 +15,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 24 * 60 * 60
+QUEUE_FULL_RETRY_DELAY = 60
 
 
 class KnowledgeGapsScheduler(object):
@@ -55,7 +57,10 @@ class KnowledgeGapsTimer(Thread):
         while not self.finished.is_set():
             self.finished.wait(self._interval)
             if not self.finished.is_set():
-                self._run_once()
+                try:
+                    self._run_once()
+                except Exception:
+                    logger.exception('Knowledge gaps scheduler run failed')
 
     def cancel(self):
         self.finished.set()
@@ -64,18 +69,39 @@ class KnowledgeGapsTimer(Thread):
         project_uuids = self._list_project_uuids()
         logger.info('Knowledge gaps scheduler found %s projects', len(project_uuids))
         for project_uuid in project_uuids:
+            if not self._submit_project(project_uuid):
+                break
+
+    def _submit_project(self, project_uuid):
+        while not self.finished.is_set():
             try:
                 result = analyze_knowledge_gaps(project_uuid)
                 logger.info('Knowledge gaps analysis submitted for %s: %s', project_uuid, result)
+                return True
+            except ConnectionError as e:
+                status = e.args[0] if e.args else None
+                if status != 429:
+                    logger.exception('Failed to submit knowledge gaps analysis for %s: %s', project_uuid, e)
+                    return True
+                logger.warning(
+                    'Knowledge gaps queue is full, retry project %s in %s sec',
+                    project_uuid,
+                    QUEUE_FULL_RETRY_DELAY,
+                )
+                if self.finished.wait(QUEUE_FULL_RETRY_DELAY):
+                    return False
             except Exception as e:
                 logger.exception('Failed to submit knowledge gaps analysis for %s: %s', project_uuid, e)
+                return True
+        return False
 
     def _list_project_uuids(self):
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
         sql = (
             'SELECT DISTINCT s.project_uuid FROM portal_chat_messages m '
             'INNER JOIN portal_chat_sessions s ON s.session_uuid = m.session_uuid '
-            "WHERE m.role = 'user' AND m.evaluated_at IS NULL"
+            "WHERE m.role = 'user' AND m.evaluated_at IS NULL AND m.created_at < :cutoff"
         )
         with self._db_session_class() as session:
-            rows = session.execute(text(sql)).fetchall()
+            rows = session.execute(text(sql), {'cutoff': cutoff}).fetchall()
         return [str(row.project_uuid) for row in rows if row.project_uuid]
