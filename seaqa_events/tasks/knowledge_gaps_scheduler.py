@@ -100,7 +100,10 @@ class KnowledgeGapsTimer(Thread):
         sql = (
             'SELECT DISTINCT s.project_uuid FROM portal_chat_messages m '
             'INNER JOIN portal_chat_sessions s ON s.session_uuid = m.session_uuid '
-            "WHERE m.role = 'user' AND m.evaluated_at IS NULL AND m.created_at < :cutoff"
+            'LEFT JOIN portal_chat_analysis a ON a.session_uuid = m.session_uuid '
+            'AND a.message_id = m.message_id '
+            "WHERE m.role = 'user' AND m.message_id IS NOT NULL "
+            'AND m.created_at < :cutoff AND (a.id IS NULL OR a.evaluated_at IS NULL)'
         )
         with self._db_session_class() as session:
             rows = session.execute(text(sql), {'cutoff': cutoff}).fetchall()
