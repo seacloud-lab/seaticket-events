@@ -16,11 +16,11 @@ class Base(DeclarativeBase):
 
 def create_engine_from_conf(configs):
     """Create database engine from configuration."""
-    host = configs.get('SEAQA_MYSQL_DB_HOST', 'localhost')
-    port = configs.get('SEAQA_MYSQL_DB_PORT', 3306)
-    username = configs.get('SEAQA_MYSQL_DB_USER', 'seaqa')
-    password = configs.get('SEAQA_MYSQL_DB_PASSWORD', '')
-    db_name = configs.get('SEAQA_MYSQL_SEAQA_DB_NAME', 'sea_qa')
+    host = configs.get('MYSQL_DB_HOST', 'localhost')
+    port = configs.get('MYSQL_DB_PORT', 3306)
+    username = configs.get('MYSQL_DB_USER', 'seaticket')
+    password = configs.get('MYSQL_DB_PASSWORD', '')
+    db_name = configs.get('MYSQL_DB_NAME', 'seaticket_db')
 
     db_url = "mysql+mysqldb://%s:%s@%s:%s/%s?charset=utf8" % \
                 (username, quote_plus(password), host, port, db_name)
