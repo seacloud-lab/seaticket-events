@@ -40,9 +40,9 @@ class LogConfigurator(object):
     def _rotating_config(self):
         logging.root.setLevel(self._level)
 
-        if os.environ.get('SEAQA_LOG_TO_STDOUT', 'false') == 'true':
+        if os.environ.get('SEATICKET_LOG_TO_STDOUT', 'false') == 'true':
             # logs to stdout
-            stdout_formatter = logging.Formatter(get_format(component='seaqa-events'), datefmt="%Y-%m-%d %H:%M:%S")
+            stdout_formatter = logging.Formatter(get_format(component='seaticket-events'), datefmt="%Y-%m-%d %H:%M:%S")
             stdout_handler = logging.StreamHandler()
             stdout_handler.setFormatter(stdout_formatter)
             logging.root.addHandler(stdout_handler)
@@ -57,8 +57,8 @@ class LogConfigurator(object):
 
     def _basic_config(self):
         # Log to stdout. Mainly for development.
-        if os.environ.get('SEAQA_LOG_TO_STDOUT', 'false') == 'true':
-            component = 'seaqa-events'
+        if os.environ.get('SEATICKET_LOG_TO_STDOUT', 'false') == 'true':
+            component = 'seaticket-events'
         else:
             component = None
         kw = {
@@ -79,7 +79,7 @@ def setup_logger(logname, fmt=None, level=None, propagate=None):
     if propagate is not None:
         logger.propagate = propagate
 
-    if os.environ.get('SEAQA_LOG_TO_STDOUT', 'false') == 'true':
+    if os.environ.get('SEATICKET_LOG_TO_STDOUT', 'false') == 'true':
         # logs to stdout
         logger_component_name = logname
         stdout_handler = logging.StreamHandler()
@@ -110,4 +110,3 @@ def setup_logger(logname, fmt=None, level=None, propagate=None):
         logger.addHandler(handler)
 
     return logger
-
