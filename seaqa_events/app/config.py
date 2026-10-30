@@ -110,8 +110,8 @@ def get_llm_price(models):
     return prices
 
 CONF_DIR = os.getenv('CONF_PATH', '/opt/seaqa/conf/')
-yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEAQA_CONFIG_NAME', 'seaqa_config.yaml'))
-configs = _ConfigParser(yaml_file_path, 'seaqa-events')
+yaml_file_path = os.path.join(CONF_DIR, os.environ.get('SEATICKET_CONFIG_NAME', 'seaticket_config.yaml'))
+configs = _ConfigParser(yaml_file_path, 'seaticket-events')
 AI_PRICES = get_llm_price(configs.get('LLM_MODELS', []) + [configs.get('EMBEDDING_MODEL', {})])
 JWT_PRIVATE_KEY = configs.get('JWT_PRIVATE_KEY', '')
 SEADB_SERVER_URL = configs.get('SEADB_SERVER_URL', 'http://seadb:8888')
