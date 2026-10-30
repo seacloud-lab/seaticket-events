@@ -2,10 +2,9 @@
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from copy import deepcopy
-from datetime import datetime
 from threading import Thread, Lock
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -163,8 +162,10 @@ class AIStatsWorker:
 
         logger.debug('There are %s project stats', len(project_stats))
 
-        today = datetime.today().date()
-        now = datetime.now()
+        now_utc = datetime.now(timezone.utc)
+        today = now_utc.date()
+        # MySQL DATETIME stores UTC values without timezone information.
+        now = now_utc.replace(tzinfo=None)
 
         # Prepare statistics (ai_usage_statistics)
         # due to only has key `id` is unique, so the update will be performed using multiple SQL statements.
@@ -285,7 +286,7 @@ class AIStatsWorker:
             session.close()
         for org_id, cost_delta in org_cost_delta.items():
             try:
-                result = self._additional_credits_service.deduct_overflow_credits(org_id, cost_delta)
+                result = self._additional_credits_service.deduct_overflow_credits(org_id, cost_delta, usage_date=today)
                 if result and result.get('overflow_credits_to_deduct'):
                     logger.info(
                         'Deduct additional credits for org_id=%s monthly_credit=%s overflow=%s deducted=%s not_covered=%s remaining=%s',

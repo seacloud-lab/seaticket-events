@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
-from datetime import date
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 from seaqa_events.db import init_db_session_class
@@ -60,7 +60,7 @@ class AdditionalCreditsService:
             session.close()
 
     def get_month_used_credits(self, org_id, today=None):
-        """Return the organization's used AI credits for the current month.
+        """Return the organization's used AI credits for the specified UTC month.
 
         Cost is stored in ``ai_usage_statistics.cost`` and converted to credits
         with the current ``cost * 100`` rule.
@@ -69,17 +69,22 @@ class AdditionalCreditsService:
             float: Credits already consumed in the target month. Falls back to
                 0 when the query fails.
         """
-        month_today = today or date.today()
+        month_today = today or datetime.now(timezone.utc).date()
         month_start = month_today.replace(day=1)
+        if month_start.month == 12:
+            next_month_start = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            next_month_start = month_start.replace(month=month_start.month + 1)
         session = self._db_session_class()
         try:
             result = session.execute(text('''
                 SELECT COALESCE(SUM(cost), 0)
                 FROM ai_usage_statistics
-                WHERE org_id=:org_id AND date>=:month_start
+                WHERE org_id=:org_id AND date>=:month_start AND date<:next_month_start
             '''), {
                 'org_id': org_id,
                 'month_start': month_start,
+                'next_month_start': next_month_start,
             }).fetchone()
             total_cost = float(result[0] or 0)
             return total_cost * 100
@@ -89,10 +94,10 @@ class AdditionalCreditsService:
         finally:
             session.close()
 
-    def deduct_overflow_credits(self, org_id, cost_delta):
+    def deduct_overflow_credits(self, org_id, cost_delta, usage_date=None):
         """Deduct purchased credits for the newly overflowed monthly usage.
 
-        "Overflow" means the portion of this month's used credits that exceeds
+        "Overflow" means the portion of the batch month's used credits that exceeds
         the organization's monthly role quota. This method only deducts the
         overflow newly introduced by the latest usage batch represented by
         ``cost_delta``; it does not re-deduct overflow that already existed.
@@ -101,6 +106,8 @@ class AdditionalCreditsService:
             org_id (int): Organization id.
             cost_delta (float): Newly added usage cost from the latest stats
                 batch. It is converted to credits with ``cost_delta * 100``.
+            usage_date (date | None): UTC date assigned to the stats batch.
+                Defaults to the current UTC date for callers without a batch.
 
         Returns:
             dict | None:
@@ -121,6 +128,7 @@ class AdditionalCreditsService:
         if cost_delta <= 0:
             return None
 
+        usage_date = usage_date or datetime.now(timezone.utc).date()
         monthly_credit = self.get_monthly_credit_by_org_id(org_id)
         if monthly_credit < 0:
             return {
@@ -130,8 +138,8 @@ class AdditionalCreditsService:
                 'additional_remaining': None,
             }
 
-        # Total credits consumed so far this month (cost × 100).
-        current_used_credits = self.get_month_used_credits(org_id)
+        # Use the batch's month even if deduction runs after UTC midnight.
+        current_used_credits = self.get_month_used_credits(org_id, today=usage_date)
         # Credits exceeding the monthly role quota right now.
         current_overflow = max(0.0, current_used_credits - monthly_credit)
         # Credits consumed *before* the latest batch was added, bounded at zero.
