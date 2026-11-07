@@ -262,7 +262,8 @@ class AIStatsWorker:
                 input_tokens = usage.get('input_tokens') or 0
                 cached_tokens = usage.get('cached_tokens') or 0
                 output_tokens = usage.get('output_tokens') or 0
-                cost = AI_PRICES[model].get('input_tokens', 0) * (input_tokens / 1e6)
+                uncached_input_tokens = input_tokens - cached_tokens
+                cost = AI_PRICES[model].get('input_tokens', 0) * (uncached_input_tokens / 1e6)
                 cost += AI_PRICES[model].get('cached_tokens', 0) * (cached_tokens / 1e6)
                 cost += AI_PRICES[model].get('output_tokens', 0) * (output_tokens / 1e6)
                 session_data[session_uuid]['input_tokens'] += input_tokens
