@@ -1,7 +1,7 @@
-redis==8.1.0
-SQLAlchemy==2.1.6
-apscheduler==3.11.3
+redis==8.1.*
+SQLAlchemy==2.1.*
+apscheduler==3.11.*
 # Match Web's botocore-compatible version in the shared development environment.
-python-dateutil==2.9.0.post0
-mysqlclient==2.3.0
-pyyaml==6.0.3
+python-dateutil==2.9.*
+mysqlclient==2.3.*
+pyyaml==6.0.*
