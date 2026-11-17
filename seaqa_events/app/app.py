@@ -10,6 +10,7 @@ from seaqa_events.tasks.project_connection_cleaner import ProjectConnectionClean
 from seaqa_events.tasks.project_storage_usage import ProjectStorageUsageCollector
 from seaqa_events.tasks.issues_counter import IssuesCounter
 from seaqa_events.tasks.linking_processor import LinkingProcessor
+from seaqa_events.tasks.knowledge_gaps_scheduler import KnowledgeGapsScheduler
 
 
 class App(object):
@@ -40,6 +41,8 @@ class App(object):
         # linking processor: records activity logs on tickets linked to data events
         self.linking_processor = LinkingProcessor(configs)
 
+        self.knowledge_gaps_scheduler = KnowledgeGapsScheduler(configs)
+
     def serve_forever(self):
         # ai stats worker
         self.ai_stats_worker.start()
@@ -57,6 +60,8 @@ class App(object):
         self.issues_counter.start()
 
         self.linking_processor.start()
+
+        self.knowledge_gaps_scheduler.start()
 
         # Keep main thread alive
         try:
