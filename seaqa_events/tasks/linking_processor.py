@@ -434,7 +434,7 @@ class LinkingWorker(Thread):
                 rows.append(_make_row({field: old_obj.get(field)}, {field: new_obj.get(field)}))
             return rows
 
-        if event_type == 'email_message_added':
+        if event_type in ('email_message_added', 'email_message_received'):
             return [{
                 'ticket_id': linked_ticket,
                 'activity_type': event_type,
@@ -475,7 +475,7 @@ class LinkingWorker(Thread):
             }
 
         # email
-        if event_type == 'email_message_added':
+        if event_type in ('email_message_added', 'email_message_received'):
             return None, {'count': 1}
 
         if event_type.startswith('github_issue_'):
