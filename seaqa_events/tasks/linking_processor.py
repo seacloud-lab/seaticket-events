@@ -30,6 +30,9 @@ DISCOURSE_TOPIC_DISPLAY_FIELDS = ['title', 'category_id', 'resolved']
 # Fields from a Discord thread row worth surfacing in the activity log
 DISCORD_THREAD_DISPLAY_FIELDS = ['title']
 
+# Fields from an Email thread row worth surfacing in the activity log
+EMAIL_THREAD_DISPLAY_FIELDS = ['title']
+
 # Fields from a general task row worth surfacing in the activity log
 GENERAL_TASK_DISPLAY_FIELDS = ['title', 'status', 'size', 'priority', 'assignees', 'version', 'due_date']
 
@@ -424,6 +427,7 @@ class LinkingWorker(Thread):
             'github_issue_updated',
             'discourse_topic_updated',
             'discord_thread_updated',
+            'email_thread_updated',
             'general_task_updated',
         ):
             # one row per changed field
@@ -484,6 +488,8 @@ class LinkingWorker(Thread):
             display_fields = DISCOURSE_TOPIC_DISPLAY_FIELDS
         elif event_type.startswith('discord_thread_'):
             display_fields = DISCORD_THREAD_DISPLAY_FIELDS
+        elif event_type.startswith('email_thread_'):
+            display_fields = EMAIL_THREAD_DISPLAY_FIELDS
         elif event_type.startswith('general_task_'):
             display_fields = GENERAL_TASK_DISPLAY_FIELDS
         else:
